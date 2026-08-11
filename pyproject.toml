@@ -1,0 +1,9 @@
+[project]
+name = "day-ja-view-semantic-events"
+version = "0.1.0"
+description = "Geopolitical and policy event candidate ingestion for DAY-JA-VIEW"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.unittest]
+start-directory = "research/semantic_events/tests"

@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://day-ja-view.local/contracts/semantic-event-v0.schema.json",
+  "title": "DAY-JA-VIEW Semantic Event Classification V0",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "source_item_id",
+    "title",
+    "taxonomy_code",
+    "event_time",
+    "first_seen_at",
+    "entities",
+    "confidence",
+    "evidence"
+  ],
+  "properties": {
+    "schema_version": {"const": "semantic-event-v0"},
+    "source_item_id": {"type": "string", "minLength": 1},
+    "title": {"type": "string", "minLength": 1},
+    "summary": {"type": ["string", "null"]},
+    "taxonomy_code": {
+      "type": "string",
+      "pattern": "^(GEO|POL)(\\.[A-Z_]+)*$"
+    },
+    "event_time": {"type": ["string", "null"], "format": "date-time"},
+    "announced_at": {"type": ["string", "null"], "format": "date-time"},
+    "effective_at": {"type": ["string", "null"], "format": "date-time"},
+    "first_seen_at": {"type": "string", "format": "date-time"},
+    "jurisdiction": {"type": ["string", "null"]},
+    "entities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["type", "code", "name", "role"],
+        "properties": {
+          "type": {
+            "enum": ["country", "region", "organization", "person", "industry", "company", "commodity", "currency"]
+          },
+          "code": {"type": "string"},
+          "name": {"type": "string"},
+          "role": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "impact_channels": {
+      "type": "array",
+      "items": {
+        "enum": ["risk_premium", "trade", "supply_chain", "commodity", "currency", "rates", "liquidity", "demand", "compliance_cost"]
+      },
+      "uniqueItems": true
+    },
+    "sentiment": {
+      "type": ["object", "null"],
+      "description": "뉴스 모델 전용 보조 출력이며 공식 사건 레코드에는 필수가 아니다.",
+      "properties": {
+        "direction": {"enum": ["positive", "negative", "neutral", "mixed"]},
+        "score": {"type": "number", "minimum": 0, "maximum": 1}
+      },
+      "required": ["direction", "score"],
+      "additionalProperties": false
+    },
+    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    "classification_method": {
+      "enum": ["official_metadata", "rule", "model", "human", "hybrid"]
+    },
+    "model_version": {"type": ["string", "null"]},
+    "evidence": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["url", "source_role"],
+        "properties": {
+          "url": {"type": "string", "format": "uri"},
+          "source_role": {"enum": ["primary", "corroborating", "context"]},
+          "quote_or_field": {"type": ["string", "null"]}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
+
