@@ -27,7 +27,8 @@ Numeric 시계열, Event Study, 프론트, Q5 유사 장세는 담당 범위가 
 - GED 26.1 공식 ZIP 전체 다운로드와 CSV 스트리밍 처리
 - 토큰 기반 UCDP REST API, 버전·날짜·지역·페이지 처리
 - 원본 row와 SHA-256 불변 저장
-- 중동 지역 + best-estimate 사망자 25명 이상 v1 규칙
+- 동일 conflict의 3일 이내 row를 하나의 Episode로 묶는 v2 규칙
+- 합산 사망자 25명 이상 + 직전 30일 대비 1.5배 이상일 때 Escalation 판정
 - `djv:Escalation`, `occurredIn=MiddleEast` 생성
 - `side_a`, `side_b`를 `hasParticipant` 관계로 저장
 - UCDP conflict를 `partOfEvent` 관계로 저장
@@ -36,7 +37,7 @@ Numeric 시계열, Event Study, 프론트, Q5 유사 장세는 담당 범위가 
 - dataset version·source URI·입력 hash·coverage·accepted 수 snapshot 저장
 - 같은 입력 재실행 시 중복 삽입 방지
 
-실데이터 검증 결과: GED 26.1 417,968행, accepted Episode 3,780건,
+실데이터 검증 결과: GED 26.1 417,968행, accepted Episode 657건,
 기간 1989-01-01~2025-12-03, pending 0건.
 
 ### Federal Register / 정책·규제
@@ -47,24 +48,23 @@ Numeric 시계열, Event Study, 프론트, Q5 유사 장세는 담당 범위가 
   `djv:ExportControlTightening` 생성
 - `targetsAgent=China`, `affectsIndustry=Semiconductor` 관계 생성
 - 검증 통과 시 자동 accepted
+- 발표일과 시행일(`effective_on`) 분리 저장
+- 수출통제 강화·완화와 중국 대상 경제제재 강화 규칙 분리
 
 실데이터 검증 결과: 검색 문서 42건 중 정책 Episode 4건 accepted,
 pending 0건, critical 0건.
 
 ## 남은 작업
 
-1. UCDP 개별 고강도 row를 conflict·dyad·인접 날짜 기준 Episode로 묶는다.
-2. 직전 기간 대비 사망자 증가율과 지속 기간을 사용해 Escalation을 판정한다.
-3. UCDP dataset release date를 snapshot metadata에 추가한다. ZIP SHA-256은 완료.
-4. API/다운로드 체크포인트를 DB에 기록하고 중단 지점부터 재개한다.
-5. Federal Register의 발표일과 시행일을 분리한다.
-6. 수출통제 완화·해제 및 경제제재·관세·수입제한 규칙을 추가한다.
-7. 국가·기관·산업 ID catalog를 팀 ontology IRI와 최종 정렬한다.
-8. 팀 백엔드가 읽을 projection/export 계약을 확정한다.
+1. Episode 지속 기간을 별도 강도 피처로 반영한다.
+2. API/다운로드 체크포인트를 DB에 기록하고 중단 지점부터 재개한다.
+3. 관세·수입제한·보조금·시장규제 규칙을 추가한다.
+4. 국가·기관·산업 ID catalog를 팀 ontology IRI와 최종 정렬한다.
+5. 팀 백엔드가 읽을 projection/export 계약을 확정한다.
 
 ## 현재 제한
 
-- 사망자 25명 기준은 재현 가능한 v1 기준이지만, 모든 행이 실제 “확대”를 뜻하지는 않는다.
+- v2 Escalation 임계값(25명·1.5배·3일·30일)은 재현 가능하지만 제품 calibration이 필요하다.
 - UCDP 과거 버전의 정확한 공개일 metadata가 아직 없어 현재 수집 시각을
   보수적인 public availability로 사용한다.
 - UCDP API 증분 실행에는 `UCDP_API_TOKEN`이 필요하다. 공식 ZIP backfill은

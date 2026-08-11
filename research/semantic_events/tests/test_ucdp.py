@@ -7,7 +7,11 @@ from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
-from research.semantic_events.collectors.ucdp import fetch_events, store_events
+from research.semantic_events.collectors.ucdp import (
+    build_escalation_episodes,
+    fetch_events,
+    store_events,
+)
 from research.semantic_events.db import SemanticEventDB
 
 
@@ -29,6 +33,34 @@ MIDDLE_EAST_ESCALATION = {
 
 
 class UcdpCollectorTest(unittest.TestCase):
+    def test_nearby_rows_are_grouped_into_one_episode(self):
+        first = {**MIDDLE_EAST_ESCALATION, "id": 2001, "best": 15}
+        second = {
+            **MIDDLE_EAST_ESCALATION,
+            "id": 2002,
+            "best": 15,
+            "date_start": "2024-04-15",
+            "date_end": "2024-04-15",
+        }
+        fetched, excluded, episodes, _ = build_escalation_episodes([first, second])
+        self.assertEqual(fetched, 2)
+        self.assertEqual(excluded, 0)
+        self.assertEqual(len(episodes), 1)
+        self.assertEqual(episodes[0]["_episode_best"], 30)
+        self.assertEqual(episodes[0]["_member_event_ids"], ["2001", "2002"])
+
+    def test_episode_must_exceed_recent_conflict_baseline(self):
+        baseline = {**MIDDLE_EAST_ESCALATION, "id": 3001, "best": 20}
+        candidate = {
+            **MIDDLE_EAST_ESCALATION,
+            "id": 3002,
+            "best": 25,
+            "date_start": "2024-04-25",
+            "date_end": "2024-04-25",
+        }
+        _, _, episodes, _ = build_escalation_episodes([baseline, candidate])
+        self.assertEqual(episodes, [])
+
     def test_api_fetch_uses_token_and_follows_pages(self):
         page_one = io.BytesIO(json.dumps({
             "TotalPages": 2, "Result": [{"id": 1}]
@@ -58,7 +90,10 @@ class UcdpCollectorTest(unittest.TestCase):
     def test_middle_east_high_intensity_event_is_accepted(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             database = SemanticEventDB(Path(temp_dir) / "events.sqlite3")
-            result = store_events(database, [MIDDLE_EAST_ESCALATION])
+            result = store_events(
+                database, [MIDDLE_EAST_ESCALATION],
+                dataset_released_on="2026-06-15",
+            )
             self.assertEqual(result["inserted_candidates"], 1)
             self.assertEqual(result["validation"]["critical"], 0)
             with closing(database.connect()) as connection:
@@ -75,7 +110,8 @@ class UcdpCollectorTest(unittest.TestCase):
                     "SELECT canonical_url FROM source_documents"
                 ).fetchone()[0]
                 snapshot = connection.execute(
-                    """SELECT dataset_version, fetched_count, accepted_count,
+                    """SELECT dataset_version, dataset_released_on,
+                              fetched_count, accepted_count,
                               input_hash FROM dataset_snapshots"""
                 ).fetchone()
             self.assertEqual(candidate["event_kind_iri"], "djv:Escalation")
@@ -88,6 +124,7 @@ class UcdpCollectorTest(unittest.TestCase):
             self.assertIn("conflict:7001", relations)
             self.assertEqual(document_url, "https://ucdp.uu.se/exploratory/1001")
             self.assertEqual(snapshot["dataset_version"], "26.1")
+            self.assertEqual(snapshot["dataset_released_on"], "2026-06-15")
             self.assertEqual(snapshot["fetched_count"], 1)
             self.assertEqual(snapshot["accepted_count"], 1)
             self.assertEqual(len(snapshot["input_hash"]), 64)

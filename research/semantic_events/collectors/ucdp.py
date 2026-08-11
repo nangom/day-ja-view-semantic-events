@@ -10,7 +10,10 @@ import urllib.parse
 import urllib.request
 import uuid
 import zipfile
+from collections import deque
 from contextlib import closing
+from datetime import date
+from email.utils import parsedate_to_datetime
 from typing import Any, Iterable
 
 from ..db import SemanticEventDB, utc_now
@@ -19,8 +22,11 @@ from ..validation import validate_candidates
 
 SOURCE_CODE = "UCDP"
 NAMESPACE = uuid.UUID("cb7a4d7a-8489-4e75-aeeb-9ed1460df47f")
-RULE_VERSION = "ucdp-middle-east-escalation-v1"
+RULE_VERSION = "ucdp-middle-east-escalation-v2"
 FATALITY_THRESHOLD = 25
+ESCALATION_MULTIPLIER = 1.5
+EPISODE_GAP_DAYS = 3
+BASELINE_DAYS = 30
 API_BASE_URL = "https://ucdpapi.pcr.uu.se/api/gedevents"
 DEFAULT_VERSION = "26.1"
 DEFAULT_CSV_ZIP_URL = "https://ucdp.uu.se/downloads/ged/ged261-csv.zip"
@@ -73,7 +79,7 @@ def _first(row: dict[str, Any], *names: str) -> Any:
 
 
 def _fatalities(row: dict[str, Any]) -> int:
-    value = _first(row, "best", "best_est", "deaths_a", "fatalities") or 0
+    value = _first(row, "_episode_best", "best", "best_est", "deaths_a", "fatalities") or 0
     try:
         return int(float(value))
     except (TypeError, ValueError):
@@ -87,6 +93,91 @@ def is_middle_east_escalation(row: dict[str, Any]) -> bool:
         (country in MIDDLE_EAST_COUNTRIES or "middle east" in region)
         and _fatalities(row) >= FATALITY_THRESHOLD
     )
+
+
+def _event_date(row: dict[str, Any], *names: str) -> date:
+    return date.fromisoformat(str(_first(row, *names))[:10])
+
+
+def build_escalation_episodes(
+    rows: Iterable[dict[str, Any]],
+) -> tuple[int, int, list[dict[str, Any]], str]:
+    """Group nearby GED rows and retain only reproducible intensity increases."""
+    fetched = 0
+    input_hasher = hashlib.sha256()
+    middle_east: list[dict[str, Any]] = []
+    for row in rows:
+        fetched += 1
+        input_hasher.update(_hash(_canonical_json(row)).encode("ascii"))
+        country = str(_first(row, "country", "country_name") or "").casefold()
+        region = str(_first(row, "region", "region_name") or "").casefold()
+        if country in MIDDLE_EAST_COUNTRIES or "middle east" in region:
+            middle_east.append(dict(row))
+
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in middle_east:
+        conflict_key = str(
+            _first(row, "conflict_new_id", "conflict_dset_id", "dyad_new_id", "dyad_dset_id")
+            or f"country:{_first(row, 'country', 'country_name')}"
+        )
+        grouped.setdefault(conflict_key, []).append(row)
+
+    accepted: list[dict[str, Any]] = []
+    accepted_member_count = 0
+    for conflict_key, conflict_rows in grouped.items():
+        conflict_rows.sort(key=lambda row: _event_date(row, "date_start", "date", "event_date"))
+        clusters: list[tuple[date, date, list[dict[str, Any]]]] = []
+        current_cluster: list[dict[str, Any]] = []
+        current_start: date | None = None
+        current_end: date | None = None
+        for row in conflict_rows:
+            row_start = _event_date(row, "date_start", "date", "event_date")
+            row_end = _event_date(row, "date_end", "date", "event_date")
+            if not current_cluster:
+                current_cluster = [row]
+                current_start = row_start
+                current_end = row_end
+                continue
+            assert current_start is not None and current_end is not None
+            if (row_start - current_end).days <= EPISODE_GAP_DAYS:
+                current_cluster.append(row)
+                current_end = max(current_end, row_end)
+            else:
+                clusters.append((current_start, current_end, current_cluster))
+                current_cluster = [row]
+                current_start = row_start
+                current_end = row_end
+        if current_cluster:
+            assert current_start is not None and current_end is not None
+            clusters.append((current_start, current_end, current_cluster))
+
+        recent: deque[tuple[date, int]] = deque()
+        recent_deaths = 0
+        for start, end, cluster in clusters:
+            while recent and (start - recent[0][0]).days > BASELINE_DAYS:
+                _, expired_deaths = recent.popleft()
+                recent_deaths -= expired_deaths
+            deaths = sum(_fatalities(row) for row in cluster)
+            prior_deaths = recent_deaths
+            recent.append((end, deaths))
+            recent_deaths += deaths
+            if deaths < FATALITY_THRESHOLD:
+                continue
+            if prior_deaths and deaths < prior_deaths * ESCALATION_MULTIPLIER:
+                continue
+            representative = dict(cluster[0])
+            member_ids = [str(_first(row, "id", "id_event", "event_id")) for row in cluster]
+            representative.update({
+                "_episode_id": f"{conflict_key}:{start.isoformat()}:{end.isoformat()}",
+                "_member_event_ids": member_ids,
+                "_episode_best": deaths,
+                "_prior_30d_best": prior_deaths,
+                "date_start": start.isoformat(),
+                "date_end": end.isoformat(),
+            })
+            accepted.append(representative)
+            accepted_member_count += len(cluster)
+    return fetched, fetched - accepted_member_count, accepted, input_hasher.hexdigest()
 
 
 def fetch_events(
@@ -171,7 +262,11 @@ def collect_official_download(
     )
     with tempfile.TemporaryFile() as archive_file:
         archive_hasher = hashlib.sha256()
+        released_on: str | None = None
         with urllib.request.urlopen(request, timeout=timeout) as response:
+            last_modified = response.headers.get("Last-Modified")
+            if last_modified:
+                released_on = parsedate_to_datetime(last_modified).date().isoformat()
             while chunk := response.read(1024 * 1024):
                 archive_hasher.update(chunk)
                 archive_file.write(chunk)
@@ -188,6 +283,7 @@ def collect_official_download(
                     dataset_version=DEFAULT_VERSION,
                     source_uri=download_url,
                     input_hash=archive_hasher.hexdigest(),
+                    dataset_released_on=released_on,
                 )
 
 
@@ -198,14 +294,13 @@ def store_events(
     dataset_version: str = DEFAULT_VERSION,
     source_uri: str = "local-file",
     input_hash: str | None = None,
+    dataset_released_on: str | None = None,
 ) -> dict[str, Any]:
+    fetched, excluded, episodes, calculated_input_hash = build_escalation_episodes(rows)
     database.initialize()
     now = utc_now()
     run_id = str(uuid.uuid4())
     inserted = 0
-    excluded = 0
-    fetched = 0
-    row_hasher = hashlib.sha256()
     coverage_start: str | None = None
     coverage_end: str | None = None
     with closing(database.connect()) as connection:
@@ -215,14 +310,10 @@ def store_events(
                 "VALUES (?, ?, ?, 'running')",
                 (run_id, SOURCE_CODE, now),
             )
-            for row in rows:
-                fetched += 1
+            for row in episodes:
                 row_json = _canonical_json(row)
-                row_hasher.update(_hash(row_json).encode("ascii"))
-                if not is_middle_east_escalation(row):
-                    excluded += 1
-                    continue
-                source_id = str(_first(row, "id", "id_event", "event_id"))
+                source_id = str(_first(row, "_episode_id", "id", "id_event", "event_id"))
+                member_ids = row.get("_member_event_ids") or [source_id]
                 occurrence_on = str(_first(row, "date_start", "date", "event_date"))[:10]
                 occurrence_to_on = str(_first(row, "date_end", "date", "event_date"))[:10]
                 country = str(_first(row, "country", "country_name"))
@@ -235,7 +326,7 @@ def store_events(
                 # `source_original` is often a publisher name, not a URL. Use the
                 # stable UCDP record page as Evidence URL and preserve the source
                 # label only inside the immutable raw payload.
-                source_url = f"https://ucdp.uu.se/exploratory/{source_id}"
+                source_url = f"https://ucdp.uu.se/exploratory/{member_ids[0]}"
                 raw_result = connection.execute(
                     """
                     INSERT INTO raw_source_items (
@@ -329,17 +420,19 @@ def store_events(
                    fetched_count=?, inserted_count=?, candidate_count=? WHERE run_id=?""",
                 (utc_now(), fetched, inserted, inserted, run_id),
             )
-            final_input_hash = input_hash or row_hasher.hexdigest()
+            final_input_hash = input_hash or calculated_input_hash
             snapshot_id = _stable_id(
                 "snapshot", f"{SOURCE_CODE}:{dataset_version}:{final_input_hash}"
             )
             connection.execute(
                 """INSERT INTO dataset_snapshots (
-                  snapshot_id, source_code, dataset_version, source_uri, input_hash,
+                  snapshot_id, source_code, dataset_version, dataset_released_on,
+                  source_uri, input_hash,
                   fetched_count, accepted_count, coverage_start, coverage_end, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(source_code, dataset_version, input_hash) DO NOTHING""",
-                (snapshot_id, SOURCE_CODE, dataset_version, source_uri, final_input_hash,
+                (snapshot_id, SOURCE_CODE, dataset_version, dataset_released_on,
+                 source_uri, final_input_hash,
                  fetched, 0, coverage_start, coverage_end, utc_now()),
             )
     validation = validate_candidates(database)
@@ -363,6 +456,7 @@ def store_events(
         "excluded_from_scope": excluded,
         "snapshot_id": snapshot_id,
         "dataset_version": dataset_version,
+        "dataset_released_on": dataset_released_on,
         "input_hash": final_input_hash,
         "accepted_count": accepted_count,
         "validation": validation,

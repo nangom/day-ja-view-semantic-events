@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS dataset_snapshots (
   snapshot_id TEXT PRIMARY KEY,
   source_code TEXT NOT NULL REFERENCES source_registry(source_code),
   dataset_version TEXT NOT NULL,
+  dataset_released_on TEXT,
   source_uri TEXT NOT NULL,
   input_hash TEXT NOT NULL,
   fetched_count INTEGER NOT NULL,
@@ -117,6 +118,8 @@ CREATE TABLE IF NOT EXISTS event_candidates (
   occurrence_precision TEXT NOT NULL CHECK (occurrence_precision IN ('day', 'second', 'unknown')),
   occurrence_to_on TEXT,
   occurrence_to_at TEXT,
+  effective_on TEXT,
+  effective_at TEXT,
   publicly_available_on TEXT,
   publicly_available_at TEXT,
   availability_precision TEXT NOT NULL CHECK (availability_precision IN ('day', 'second', 'unknown')),
@@ -133,6 +136,7 @@ CREATE TABLE IF NOT EXISTS event_candidates (
   supersedes_candidate_id TEXT REFERENCES event_candidates(candidate_id),
   recorded_at TEXT NOT NULL,
   CHECK (NOT (occurrence_on IS NOT NULL AND occurrence_at IS NOT NULL)),
+  CHECK (NOT (effective_on IS NOT NULL AND effective_at IS NOT NULL)),
   CHECK (NOT (publicly_available_on IS NOT NULL AND publicly_available_at IS NOT NULL))
 );
 

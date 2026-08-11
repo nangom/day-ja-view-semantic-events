@@ -18,6 +18,7 @@ IN_SCOPE_DOCUMENT = {
     "html_url": "https://example.invalid/document",
     "pdf_url": "https://example.invalid/official.pdf",
     "publication_date": "2026-08-11",
+    "effective_on": "2026-09-15",
     "agencies": [{"name": "Test Agency"}],
 }
 
@@ -35,8 +36,40 @@ CHINA_SEMICONDUCTOR_DOCUMENT = {
     "document_number": "TEST-2026-0003",
 }
 
+CHINA_EXPORT_EASING_DOCUMENT = {
+    **CHINA_SEMICONDUCTOR_DOCUMENT,
+    "title": "License Exception Easing Export Controls for Semiconductors to China",
+    "abstract": "A rule removing export controls for specified computing chips.",
+    "document_number": "TEST-2026-0004",
+}
+
+CHINA_SANCTIONS_DOCUMENT = {
+    **IN_SCOPE_DOCUMENT,
+    "title": "China Sanctions Regulations; Blocking Property",
+    "abstract": "Additional economic sanctions imposing sanctions on designated persons.",
+    "document_number": "TEST-2026-0005",
+}
+
 
 class FederalRegisterCollectorTest(unittest.TestCase):
+    def test_policy_direction_rules_distinguish_easing_and_sanctions(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            database = SemanticEventDB(Path(temp_dir) / "events.sqlite3")
+            result = store_documents(
+                database, [CHINA_EXPORT_EASING_DOCUMENT, CHINA_SANCTIONS_DOCUMENT]
+            )
+            self.assertEqual(result["validation"]["critical"], 0)
+            with closing(database.connect()) as connection:
+                kinds = {
+                    row[0] for row in connection.execute(
+                        "SELECT event_kind_iri FROM event_candidates"
+                    )
+                }
+            self.assertEqual(
+                kinds,
+                {"djv:ExportControlEasing", "djv:EconomicSanctionTightening"},
+            )
+
     def test_fetch_follows_pages_and_honors_limit(self):
         first = io.BytesIO(json.dumps({
             "total_pages": 2, "results": [{"document_number": "A"}]
@@ -98,7 +131,7 @@ class FederalRegisterCollectorTest(unittest.TestCase):
             self.assertEqual(result["validation"]["critical"], 0)
             with closing(database.connect()) as connection:
                 candidate = connection.execute(
-                    "SELECT event_kind_iri, review_status FROM event_candidates"
+                    "SELECT event_kind_iri, review_status, effective_on FROM event_candidates"
                 ).fetchone()
                 relations = {
                     (row["predicate_iri"], row["object_key"])
@@ -108,6 +141,7 @@ class FederalRegisterCollectorTest(unittest.TestCase):
                 }
             self.assertEqual(candidate["event_kind_iri"], "djv:ExportControlTightening")
             self.assertEqual(candidate["review_status"], "accepted")
+            self.assertEqual(candidate["effective_on"], "2026-09-15")
             self.assertIn(("djv:targetsAgent", "country:CN"), relations)
             self.assertIn(("djv:affectsIndustry", "industry:SEMICONDUCTOR"), relations)
 

@@ -22,8 +22,18 @@ SEMICONDUCTOR_TERMS = (
     "semiconductor", "advanced computing", "integrated circuit", "computing chip"
 )
 TIGHTENING_TERMS = (
-    "export control", "export restriction", "export administration regulations",
-    "controls on", "adding entities",
+    "additional export controls", "new export controls", "tightening export",
+    "expanding export controls", "adding entities", "addition of entities",
+    "restricting exports",
+)
+EASING_TERMS = (
+    "easing export controls", "removing export controls", "removal of controls",
+    "rescinding export controls", "license exception", "removing entities",
+)
+SANCTION_TERMS = ("economic sanction", "sanctions regulations", "blocking sanctions")
+SANCTION_TIGHTENING_TERMS = (
+    "imposing sanctions", "additional sanctions", "blocking property",
+    "adding persons", "designation of",
 )
 
 def _stable_id(kind: str, value: str) -> str:
@@ -44,9 +54,22 @@ def _scope_match(
     text = " ".join(
         part for part in (document.get("title"), document.get("abstract")) if part
     ).casefold()
+    has_china = any(term in text for term in CHINA_TERMS)
+    has_semiconductor = any(term in text for term in SEMICONDUCTOR_TERMS)
     if (
-        any(term in text for term in CHINA_TERMS)
-        and any(term in text for term in SEMICONDUCTOR_TERMS)
+        has_china and has_semiconductor
+        and any(term in text for term in EASING_TERMS)
+    ):
+        return (
+            "POLICY.EXPORT_CONTROL.EASING.CHINA.SEMICONDUCTOR",
+            "djv:ExportControlEasing",
+            (
+                ("djv:targetsAgent", "country:CN", "China"),
+                ("djv:affectsIndustry", "industry:SEMICONDUCTOR", "Semiconductor"),
+            ),
+        )
+    if (
+        has_china and has_semiconductor
         and any(term in text for term in TIGHTENING_TERMS)
     ):
         return (
@@ -56,6 +79,16 @@ def _scope_match(
                 ("djv:targetsAgent", "country:CN", "China"),
                 ("djv:affectsIndustry", "industry:SEMICONDUCTOR", "Semiconductor"),
             ),
+        )
+    if (
+        has_china
+        and any(term in text for term in SANCTION_TERMS)
+        and any(term in text for term in SANCTION_TIGHTENING_TERMS)
+    ):
+        return (
+            "POLICY.ECONOMIC_SANCTION.TIGHTENING.CHINA",
+            "djv:EconomicSanctionTightening",
+            (("djv:targetsAgent", "country:CN", "China"),),
         )
     return None
 
@@ -301,14 +334,15 @@ def store_documents(
                     INSERT INTO event_candidates (
                       candidate_id, candidate_iri, event_kind_iri, title, summary,
                       occurrence_on, occurrence_at, occurrence_precision,
-                      occurrence_to_on, occurrence_to_at, publicly_available_on,
+                      occurrence_to_on, occurrence_to_at, effective_on, effective_at,
+                      publicly_available_on,
                       publicly_available_at, availability_precision, jurisdiction,
                       source_document_id, primary_evidence_span_id,
                       extraction_kind, extraction_rule_version, confidence_code,
                       review_status, scope_rule_id, duplicate_group_key,
                       parent_event_candidate_id, supersedes_candidate_id, recorded_at
                     ) VALUES (
-                      ?, ?, ?, ?, ?, ?, NULL, ?, NULL, NULL, ?, NULL,
+                      ?, ?, ?, ?, ?, ?, NULL, ?, NULL, NULL, ?, NULL, ?, NULL,
                       ?, 'US', ?, ?, 'rule', ?, 'high', 'pending', ?, ?,
                       NULL, ?, ?
                     )
@@ -321,6 +355,7 @@ def store_documents(
                         document.get("abstract"),
                         published_on,
                         published_precision,
+                        document.get("effective_on"),
                         published_on,
                         published_precision,
                         source_document_id,

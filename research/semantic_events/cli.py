@@ -31,6 +31,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--page-size", type=int, default=1000)
     parser.add_argument("--max-pages", type=int)
     parser.add_argument("--download-url", help="versioned official UCDP GED CSV ZIP URL")
+    parser.add_argument("--released-on", help="dataset release date in YYYY-MM-DD")
     return parser
 
 
@@ -53,7 +54,10 @@ def main() -> None:
         else:
             payload = json.loads(args.input.read_text(encoding="utf-8"))
             rows = payload.get("Result", payload.get("results", payload)) if isinstance(payload, dict) else payload
-        print(json.dumps(store_ucdp_events(database, rows), ensure_ascii=False, indent=2))
+        print(json.dumps(
+            store_ucdp_events(database, rows, dataset_released_on=args.released_on),
+            ensure_ascii=False, indent=2,
+        ))
     elif args.command == "collect-ucdp-api":
         if not args.start_date or not args.end_date:
             raise SystemExit("--start-date and --end-date are required")
