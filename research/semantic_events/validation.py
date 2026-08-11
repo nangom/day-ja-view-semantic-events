@@ -21,6 +21,9 @@ REQUIRED_RELATIONS = {
     "djv:TaxBenefitExpansion": ("djv:occurredIn", "djv:affectsIndustry"),
     "djv:RegulationTightening": ("djv:occurredIn",),
     "djv:RegulationEasing": ("djv:occurredIn",),
+    "djv:ShortSellingBan": ("djv:occurredIn",),
+    "djv:ShortSellingResumption": ("djv:occurredIn",),
+    "djv:InvestmentSupport": ("djv:occurredIn", "djv:affectsIndustry"),
 }
 AUTO_ACCEPT_KINDS = frozenset(REQUIRED_RELATIONS)
 

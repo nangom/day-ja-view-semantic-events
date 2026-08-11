@@ -6,6 +6,7 @@ import unittest
 from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
+from urllib.error import URLError
 
 from research.semantic_events.collectors.ucdp import (
     build_escalation_episodes,
@@ -87,6 +88,35 @@ class UcdpCollectorTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "UCDP_API_TOKEN"):
                 fetch_events(start_date="2024-01-01", end_date="2024-12-31")
 
+    def test_api_fetch_resumes_from_saved_page(self):
+        page_one = io.BytesIO(json.dumps({
+            "TotalPages": 2, "Result": [{"id": 1}]
+        }).encode())
+        page_two = io.BytesIO(json.dumps({
+            "TotalPages": 2, "Result": [{"id": 2}]
+        }).encode())
+        with tempfile.TemporaryDirectory() as temp_dir:
+            database = SemanticEventDB(Path(temp_dir) / "events.sqlite3")
+            with patch(
+                "research.semantic_events.collectors.ucdp.urllib.request.urlopen",
+                side_effect=[page_one, URLError("interrupted")],
+            ):
+                with self.assertRaises(URLError):
+                    fetch_events(
+                        start_date="2024-01-01", end_date="2024-12-31",
+                        token="secret", checkpoint_database=database,
+                    )
+            with patch(
+                "research.semantic_events.collectors.ucdp.urllib.request.urlopen",
+                return_value=page_two,
+            ) as urlopen:
+                rows = fetch_events(
+                    start_date="2024-01-01", end_date="2024-12-31",
+                    token="secret", checkpoint_database=database,
+                )
+        self.assertEqual([row["id"] for row in rows], [1, 2])
+        self.assertEqual(urlopen.call_count, 1)
+
     def test_middle_east_high_intensity_event_is_accepted(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             database = SemanticEventDB(Path(temp_dir) / "events.sqlite3")
@@ -114,6 +144,12 @@ class UcdpCollectorTest(unittest.TestCase):
                               fetched_count, accepted_count,
                               input_hash FROM dataset_snapshots"""
                 ).fetchone()
+                metrics = {
+                    row["metric_key"]: row["metric_value"]
+                    for row in connection.execute(
+                        "SELECT metric_key, metric_value FROM event_candidate_metrics"
+                    )
+                }
             self.assertEqual(candidate["event_kind_iri"], "djv:Escalation")
             self.assertEqual(candidate["review_status"], "accepted")
             self.assertIsNone(candidate["publicly_available_on"])
@@ -128,6 +164,9 @@ class UcdpCollectorTest(unittest.TestCase):
             self.assertEqual(snapshot["fetched_count"], 1)
             self.assertEqual(snapshot["accepted_count"], 1)
             self.assertEqual(len(snapshot["input_hash"]), 64)
+            self.assertEqual(metrics["episode_duration_days"], 1)
+            self.assertEqual(metrics["best_estimate_fatalities"], 30)
+            self.assertEqual(metrics["prior_30d_best_estimate_fatalities"], 0)
 
     def test_low_intensity_event_is_excluded(self):
         with tempfile.TemporaryDirectory() as temp_dir:

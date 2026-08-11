@@ -92,10 +92,12 @@ class SemanticEventDB:
             "source_registry",
             "event_kind_catalog",
             "dataset_snapshots",
+            "ingestion_page_checkpoints",
             "raw_source_items",
             "source_documents",
             "evidence_spans",
             "event_candidates",
+            "event_candidate_metrics",
             "event_candidate_relations",
             "review_queue",
         )

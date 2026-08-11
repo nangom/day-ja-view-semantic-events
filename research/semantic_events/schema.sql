@@ -30,6 +30,16 @@ CREATE TABLE IF NOT EXISTS ingestion_runs (
   error_message TEXT
 );
 
+CREATE TABLE IF NOT EXISTS ingestion_page_checkpoints (
+  source_code TEXT NOT NULL REFERENCES source_registry(source_code),
+  scope_key TEXT NOT NULL,
+  page_number INTEGER NOT NULL CHECK (page_number > 0),
+  payload_json TEXT NOT NULL,
+  content_hash TEXT NOT NULL,
+  saved_at TEXT NOT NULL,
+  PRIMARY KEY (source_code, scope_key, page_number)
+);
+
 CREATE TABLE IF NOT EXISTS dataset_snapshots (
   snapshot_id TEXT PRIMARY KEY,
   source_code TEXT NOT NULL REFERENCES source_registry(source_code),
@@ -144,6 +154,16 @@ CREATE INDEX IF NOT EXISTS idx_event_candidates_review
   ON event_candidates(review_status, event_kind_iri);
 CREATE INDEX IF NOT EXISTS idx_event_candidates_time
   ON event_candidates(occurrence_on, occurrence_at, publicly_available_on, publicly_available_at);
+
+CREATE TABLE IF NOT EXISTS event_candidate_metrics (
+  candidate_id TEXT NOT NULL REFERENCES event_candidates(candidate_id),
+  metric_key TEXT NOT NULL,
+  metric_value REAL NOT NULL,
+  unit TEXT NOT NULL,
+  method_version TEXT NOT NULL,
+  recorded_at TEXT NOT NULL,
+  PRIMARY KEY (candidate_id, metric_key)
+);
 
 CREATE TABLE IF NOT EXISTS event_candidate_relations (
   relation_candidate_id TEXT PRIMARY KEY,

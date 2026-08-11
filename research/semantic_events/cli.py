@@ -10,6 +10,7 @@ from .collectors.ucdp import collect as collect_ucdp
 from .collectors.ucdp import collect_official_download
 from .collectors.ucdp import store_events as store_ucdp_events
 from .db import DEFAULT_DB_PATH, SemanticEventDB
+from .export import export_accepted_jsonl
 from .validation import validate_candidates
 
 
@@ -20,7 +21,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "command",
-        choices=("init", "stats", "collect-federal-register", "collect-ucdp-api", "collect-ucdp-download", "collect-ucdp-file", "validate"),
+        choices=("init", "stats", "collect-federal-register", "collect-ucdp-api", "collect-ucdp-download", "collect-ucdp-file", "validate", "export-accepted"),
     )
     parser.add_argument("--start-date", help="inclusive date in YYYY-MM-DD")
     parser.add_argument("--end-date", help="inclusive date in YYYY-MM-DD")
@@ -32,6 +33,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-pages", type=int)
     parser.add_argument("--download-url", help="versioned official UCDP GED CSV ZIP URL")
     parser.add_argument("--released-on", help="dataset release date in YYYY-MM-DD")
+    parser.add_argument("--output", type=Path, help="accepted JSONL output path")
+    parser.add_argument("--resume", action="store_true", help="resume paged API collection")
     return parser
 
 
@@ -45,6 +48,13 @@ def main() -> None:
         print(json.dumps(database.stats(), ensure_ascii=False, indent=2))
     elif args.command == "validate":
         print(json.dumps(validate_candidates(database), ensure_ascii=False, indent=2))
+    elif args.command == "export-accepted":
+        if not args.output:
+            raise SystemExit("--output is required")
+        print(json.dumps({
+            "output": str(args.output),
+            "exported": export_accepted_jsonl(database, args.output),
+        }, ensure_ascii=False, indent=2))
     elif args.command == "collect-ucdp-file":
         if not args.input:
             raise SystemExit("--input is required")
@@ -68,6 +78,7 @@ def main() -> None:
             version=args.version,
             page_size=args.page_size,
             max_pages=args.max_pages,
+            resume=args.resume,
         )
         print(json.dumps(result, ensure_ascii=False, indent=2))
     elif args.command == "collect-ucdp-download":
@@ -84,6 +95,7 @@ def main() -> None:
             end_date=args.end_date,
             limit=args.limit,
             query=args.query,
+            resume=args.resume,
         )
         print(json.dumps(result, ensure_ascii=False, indent=2))
 

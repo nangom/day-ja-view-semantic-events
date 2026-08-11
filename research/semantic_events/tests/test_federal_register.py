@@ -5,6 +5,7 @@ import unittest
 from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
+from urllib.error import URLError
 
 from research.semantic_events.collectors.federal_register import fetch_documents, store_documents
 from research.semantic_events.db import SemanticEventDB
@@ -57,8 +58,10 @@ POLICY_FIXTURES = [
     ("Lifting Semiconductor Import Restrictions for China", "Removing import restrictions on Chinese integrated circuits.", "djv:ImportRestrictionLifting"),
     ("Semiconductor Grant Program", "Financial assistance for semiconductor manufacturing through a grant program.", "djv:SubsidyAward"),
     ("Advanced Manufacturing Investment Tax Credit", "Expanding the tax credit for semiconductor investment.", "djv:TaxBenefitExpansion"),
-    ("Securities Market Short Selling Ban", "New requirements prohibiting short selling in the financial market.", "djv:RegulationTightening"),
+    ("Securities Market Short Selling Ban", "New requirements prohibiting short selling in the financial market.", "djv:ShortSellingBan"),
+    ("Resumption of Short Selling", "Lifting the short selling ban and resuming short selling in the securities market.", "djv:ShortSellingResumption"),
     ("Securities Market Regulatory Relief", "Regulatory relief removing requirements for broker-dealers.", "djv:RegulationEasing"),
+    ("Semiconductor Facility Investment Support", "Facility investment grant and funding for semiconductor manufacturing.", "djv:InvestmentSupport"),
 ]
 
 
@@ -133,6 +136,35 @@ class FederalRegisterCollectorTest(unittest.TestCase):
             )
         self.assertEqual([row["document_number"] for row in rows], ["A", "B"])
         self.assertEqual(urlopen.call_count, 2)
+
+    def test_fetch_resumes_from_saved_page(self):
+        first = io.BytesIO(json.dumps({
+            "total_pages": 2, "results": [{"document_number": "A"}]
+        }).encode())
+        second = io.BytesIO(json.dumps({
+            "total_pages": 2, "results": [{"document_number": "B"}]
+        }).encode())
+        with tempfile.TemporaryDirectory() as temp_dir:
+            database = SemanticEventDB(Path(temp_dir) / "events.sqlite3")
+            with patch(
+                "research.semantic_events.collectors.federal_register.urllib.request.urlopen",
+                side_effect=[first, URLError("interrupted")],
+            ):
+                with self.assertRaises(URLError):
+                    fetch_documents(
+                        start_date="2024-01-01", end_date="2024-12-31", limit=2,
+                        checkpoint_database=database,
+                    )
+            with patch(
+                "research.semantic_events.collectors.federal_register.urllib.request.urlopen",
+                return_value=second,
+            ) as urlopen:
+                rows = fetch_documents(
+                    start_date="2024-01-01", end_date="2024-12-31", limit=2,
+                    checkpoint_database=database,
+                )
+        self.assertEqual([row["document_number"] for row in rows], ["A", "B"])
+        self.assertEqual(urlopen.call_count, 1)
 
     def test_store_is_idempotent(self):
         with tempfile.TemporaryDirectory() as temp_dir:

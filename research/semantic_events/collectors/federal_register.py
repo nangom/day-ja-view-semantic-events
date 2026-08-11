@@ -9,6 +9,7 @@ import uuid
 from contextlib import closing
 from typing import Any
 
+from ..checkpoints import clear_scope, load_page, save_page, scope_key
 from ..db import SemanticEventDB, utc_now
 from ..validation import validate_candidates
 
@@ -73,6 +74,10 @@ REGULATION_EASING_TERMS = (
     "removing requirements", "rescinding requirements", "regulatory relief",
     "resuming short selling", "lifting the short selling ban",
 )
+INVESTMENT_SUPPORT_TERMS = (
+    "investment support", "investment incentive", "funding for semiconductor",
+    "semiconductor manufacturing incentives", "facility investment grant",
+)
 
 def _stable_id(kind: str, value: str) -> str:
     return str(uuid.uuid5(NAMESPACE, f"{kind}:{value}"))
@@ -97,6 +102,22 @@ def _scope_match(
 
     # Direction-specific rules are intentionally conjunctive. A topic word by
     # itself is never enough to produce an automatically accepted episode.
+    if "short selling" in text and any(
+        term in text for term in ("resuming short selling", "lifting the short selling ban")
+    ):
+        return (
+            "POLICY.SHORT_SELLING.RESUMPTION.US",
+            "djv:ShortSellingResumption",
+            (("djv:occurredIn", "country:US", "United States"),),
+        )
+    if "short selling" in text and any(
+        term in text for term in ("short selling ban", "prohibiting short selling")
+    ):
+        return (
+            "POLICY.SHORT_SELLING.BAN.US",
+            "djv:ShortSellingBan",
+            (("djv:occurredIn", "country:US", "United States"),),
+        )
     if (
         any(term in text for term in FINANCIAL_MARKET_TERMS)
         and any(term in text for term in REGULATION_EASING_TERMS)
@@ -197,6 +218,15 @@ def _scope_match(
                 ("djv:affectsIndustry", "industry:SEMICONDUCTOR", "Semiconductor"),
             ),
         )
+    if has_semiconductor and any(term in text for term in INVESTMENT_SUPPORT_TERMS):
+        return (
+            "POLICY.INVESTMENT_SUPPORT.US.SEMICONDUCTOR",
+            "djv:InvestmentSupport",
+            (
+                ("djv:occurredIn", "country:US", "United States"),
+                ("djv:affectsIndustry", "industry:SEMICONDUCTOR", "Semiconductor"),
+            ),
+        )
     if (
         has_china and has_semiconductor
         and any(term in text for term in TIGHTENING_TERMS)
@@ -250,7 +280,7 @@ def _insert_relation(
 
 def fetch_documents(
     *, start_date: str, end_date: str, limit: int = 20, timeout: int = 30,
-    query: str | None = None,
+    query: str | None = None, checkpoint_database: SemanticEventDB | None = None,
 ) -> list[dict[str, Any]]:
     if limit < 1 or limit > 1000:
         raise ValueError("limit must be between 1 and 1000")
@@ -265,16 +295,27 @@ def fetch_documents(
     if query:
         query_params["conditions[term]"] = query
     documents: list[dict[str, Any]] = []
+    checkpoint_key = scope_key({
+        "start_date": start_date, "end_date": end_date, "limit": limit,
+        "query": query, "types": query_params["conditions[type][]"],
+    })
     page = 1
     while len(documents) < limit:
         query_params["page"] = page
         params = urllib.parse.urlencode(query_params, doseq=True)
-        request = urllib.request.Request(
-            f"{API_URL}?{params}",
-            headers={"User-Agent": "DAY-JA-VIEW-semantic-events/0.2"},
+        payload = (
+            load_page(checkpoint_database, SOURCE_CODE, checkpoint_key, page)
+            if checkpoint_database else None
         )
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            payload = json.load(response)
+        if payload is None:
+            request = urllib.request.Request(
+                f"{API_URL}?{params}",
+                headers={"User-Agent": "DAY-JA-VIEW-semantic-events/0.2"},
+            )
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                payload = json.load(response)
+            if checkpoint_database:
+                save_page(checkpoint_database, SOURCE_CODE, checkpoint_key, page, payload)
         results = payload.get("results", [])
         documents.extend(results)
         total_pages = int(payload.get("total_pages", page))
@@ -532,9 +573,21 @@ def store_documents(
 
 def collect(
     database: SemanticEventDB, *, start_date: str, end_date: str, limit: int = 20,
-    query: str | None = None,
+    query: str | None = None, resume: bool = False,
 ) -> dict[str, Any]:
-    return store_documents(
+    checkpoint_key = scope_key({
+        "start_date": start_date, "end_date": end_date, "limit": limit,
+        "query": query, "types": ["RULE", "PRORULE", "PRESDOCU"],
+    })
+    result = store_documents(
         database,
-        fetch_documents(start_date=start_date, end_date=end_date, limit=limit, query=query),
+        fetch_documents(
+            start_date=start_date, end_date=end_date, limit=limit, query=query,
+            checkpoint_database=database if resume else None,
+        ),
     )
+    if resume:
+        result["cleared_checkpoint_pages"] = clear_scope(
+            database, SOURCE_CODE, checkpoint_key
+        )
+    return result

@@ -49,11 +49,13 @@ accepted Episode와 관계를 제공하며, 운영 publisher가 이를 snapshot�
 
 - `source_registry`: 제공처의 후보/승인/차단 상태
 - `ingestion_runs`: 수집 실행과 건수
+- `ingestion_page_checkpoints`: `--resume` 수집 중 완료된 API 페이지
 - `raw_source_items`: 원본 JSON과 content hash
 - `source_documents`: 문서 revision, 공개일, 공식 URL
 - `evidence_spans`: JSON Pointer와 해당 값의 hash
 - `event_kind_catalog`: 정본 문서에 승인된 EventKind 계층 후보
 - `event_candidates`: 아직 분석에 사용할 수 없는 사건 후보
+- `event_candidate_metrics`: Episode 기간·사망자·기준기간 대비 강도
 - `event_candidate_relations`: 국가·지역·산업·자산 관계 후보
 - `review_queue`: 승인·거절·중복 검수 대기열
 
@@ -85,10 +87,17 @@ Python 표준 라이브러리만 사용한다.
 ```powershell
 python -m research.semantic_events.cli init
 python -m research.semantic_events.cli collect-federal-register `
-  --start-date 2026-08-01 --end-date 2026-08-11 --limit 20
+  --start-date 2026-08-01 --end-date 2026-08-11 --limit 20 --resume
 python -m research.semantic_events.cli stats
+python -m research.semantic_events.cli export-accepted `
+  --output work/accepted-semantic-events.jsonl
 python -m unittest discover research/semantic_events/tests
 ```
+
+`--resume`은 API 페이지를 DB에 임시 저장한다. 수집이 중단되면 완료된 페이지부터
+이어 받고, 저장까지 성공하면 해당 범위의 체크포인트를 자동 삭제한다. JSONL
+내보내기는 accepted Episode, 관계, Evidence URL·hash, 지표를 포함하지만 팀
+백엔드의 최종 projection 형식을 가정하지 않는다.
 
 기본 DB는 `research/semantic_events/data/semantic_events.sqlite3`이며 Git에 포함하지
 않는다. SQLite는 수집·검수 프로토타입이다. PostgreSQL 정본으로 이전할 때는

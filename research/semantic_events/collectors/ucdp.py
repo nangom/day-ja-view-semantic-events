@@ -16,6 +16,7 @@ from datetime import date
 from email.utils import parsedate_to_datetime
 from typing import Any, Iterable
 
+from ..checkpoints import clear_scope, load_page, save_page, scope_key
 from ..db import SemanticEventDB, utc_now
 from ..validation import validate_candidates
 
@@ -189,6 +190,7 @@ def fetch_events(
     page_size: int = 1000,
     max_pages: int | None = None,
     timeout: int = 60,
+    checkpoint_database: SemanticEventDB | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch versioned UCDP GED pages using the official token API."""
     access_token = token or os.environ.get("UCDP_API_TOKEN")
@@ -198,6 +200,11 @@ def fetch_events(
         raise ValueError("page_size must be between 1 and 1000")
 
     rows: list[dict[str, Any]] = []
+    checkpoint_key = scope_key({
+        "start_date": start_date, "end_date": end_date, "version": version,
+        "page_size": page_size, "max_pages": max_pages,
+        "geography": MIDDLE_EAST_GEOGRAPHY,
+    })
     page = 1
     while True:
         params = urllib.parse.urlencode(
@@ -209,15 +216,22 @@ def fetch_events(
                 "Geography": MIDDLE_EAST_GEOGRAPHY,
             }
         )
-        request = urllib.request.Request(
-            f"{API_BASE_URL}/{version}?{params}",
-            headers={
-                "x-ucdp-access-token": access_token,
-                "User-Agent": "DAY-JA-VIEW-semantic-events/0.2",
-            },
+        payload = (
+            load_page(checkpoint_database, SOURCE_CODE, checkpoint_key, page)
+            if checkpoint_database else None
         )
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            payload = json.load(response)
+        if payload is None:
+            request = urllib.request.Request(
+                f"{API_BASE_URL}/{version}?{params}",
+                headers={
+                    "x-ucdp-access-token": access_token,
+                    "User-Agent": "DAY-JA-VIEW-semantic-events/0.2",
+                },
+            )
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                payload = json.load(response)
+            if checkpoint_database:
+                save_page(checkpoint_database, SOURCE_CODE, checkpoint_key, page, payload)
         rows.extend(payload.get("Result", []))
         total_pages = int(payload.get("TotalPages", page))
         if page >= total_pages or (max_pages is not None and page >= max_pages):
@@ -234,8 +248,14 @@ def collect(
     version: str = DEFAULT_VERSION,
     page_size: int = 1000,
     max_pages: int | None = None,
+    resume: bool = False,
 ) -> dict[str, Any]:
-    return store_events(
+    checkpoint_key = scope_key({
+        "start_date": start_date, "end_date": end_date, "version": version,
+        "page_size": page_size, "max_pages": max_pages,
+        "geography": MIDDLE_EAST_GEOGRAPHY,
+    })
+    result = store_events(
         database,
         fetch_events(
             start_date=start_date,
@@ -243,10 +263,16 @@ def collect(
             version=version,
             page_size=page_size,
             max_pages=max_pages,
+            checkpoint_database=database if resume else None,
         ),
         dataset_version=version,
         source_uri=f"{API_BASE_URL}/{version}",
     )
+    if resume:
+        result["cleared_checkpoint_pages"] = clear_scope(
+            database, SOURCE_CODE, checkpoint_key
+        )
+    return result
 
 
 def collect_official_download(
@@ -382,6 +408,36 @@ def store_events(
                      document_id, evidence_id, RULE_VERSION,
                      "GEO.ARMED_CONFLICT.ESCALATION.MIDDLE_EAST",
                      _hash(f"{source_id}|{occurrence_on}"), now),
+                )
+                duration_days = (
+                    date.fromisoformat(occurrence_to_on)
+                    - date.fromisoformat(occurrence_on)
+                ).days + 1
+                prior_fatalities = int(row.get("_prior_30d_best") or 0)
+                metrics = (
+                    ("episode_duration_days", duration_days, "day"),
+                    ("best_estimate_fatalities", _fatalities(row), "person"),
+                    ("prior_30d_best_estimate_fatalities", prior_fatalities, "person"),
+                    (
+                        "fatality_intensity_ratio",
+                        _fatalities(row) / prior_fatalities if prior_fatalities else _fatalities(row),
+                        "ratio",
+                    ),
+                )
+                connection.executemany(
+                    """INSERT INTO event_candidate_metrics (
+                      candidate_id, metric_key, metric_value, unit,
+                      method_version, recorded_at
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(candidate_id, metric_key) DO UPDATE SET
+                      metric_value=excluded.metric_value,
+                      unit=excluded.unit,
+                      method_version=excluded.method_version,
+                      recorded_at=excluded.recorded_at""",
+                    [
+                        (candidate_id, key, value, unit, RULE_VERSION, now)
+                        for key, value, unit in metrics
+                    ],
                 )
                 _insert_relation(
                     connection, candidate_id=candidate_id,

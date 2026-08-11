@@ -35,10 +35,12 @@ Numeric 시계열, Event Study, 프론트, Q5 유사 장세는 담당 범위가 
 - 발생일과 최초 수집 가능 시각 분리
 - UCDP 공식 레코드 URL과 원본 hash를 Evidence로 저장
 - dataset version·source URI·입력 hash·coverage·accepted 수 snapshot 저장
+- Episode 기간, 사망자, 직전 30일 사망자, 강도 배수 지표 저장
 - 같은 입력 재실행 시 중복 삽입 방지
 
 실데이터 검증 결과: GED 26.1 417,968행, accepted Episode 657건,
-기간 1989-01-01~2025-12-03, pending 0건.
+기간 1989-01-01~2025-12-03, 지표 2,628건, JSONL 657건,
+pending 0건, critical 0건.
 
 ### Federal Register / 정책·규제
 
@@ -53,18 +55,21 @@ Numeric 시계열, Event Study, 프론트, Q5 유사 장세는 담당 범위가 
 - 중국 반도체 대상 관세 인상·인하와 수입제한 강화·해제 규칙 분리
 - 미국 반도체 보조금 지급·세제혜택 확대 규칙 추가
 - 미국 금융시장 규제 강화·완화 규칙 추가
+- 공매도 금지·재개와 반도체 투자지원 규칙 분리
 - 주제 단어만 있고 정책 방향이 불명확한 문서는 후보에서 제외
+- UCDP/Federal Register API 페이지 체크포인트와 `--resume` 지원
+- accepted Episode·관계·Evidence·지표의 중립 JSONL export 지원
 
-기존 실데이터 회귀 검증 결과: 검색 문서 42건 중 정책 Episode 3건 accepted,
-pending 0건, critical 0건.
+현재 공식 API 회귀 검증 결과: `semiconductor China` 검색 문서 97건 중
+정책 Episode 3건 accepted, JSONL 3건, pending 0건, critical 0건.
+
+전체 단위·통합 테스트 18건 통과.
 
 ## 남은 작업
 
-1. Episode 지속 기간을 별도 강도 피처로 반영한다.
-2. API/다운로드 체크포인트를 DB에 기록하고 중단 지점부터 재개한다.
-3. 투자지원·공매도 전용 규칙은 공식 문서 fixture와 범위를 확정한 뒤 추가한다.
-4. 국가·기관·산업 ID catalog를 팀 ontology IRI와 최종 정렬한다.
-5. 팀 백엔드가 읽을 projection/export 계약을 확정한다.
+1. 공식 ZIP 다운로드 자체의 byte-range 재개는 서버 지원 여부 확인 후 추가한다.
+2. 국가·기관·산업 ID catalog를 팀 ontology IRI와 최종 정렬한다.
+3. 중립 JSONL을 팀 백엔드 projection 계약으로 최종 매핑한다.
 
 ## 현재 제한
 
