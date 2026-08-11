@@ -10,27 +10,21 @@ from contextlib import closing
 from typing import Any
 
 from ..db import SemanticEventDB, utc_now
+from ..validation import validate_candidates
 
 
 SOURCE_CODE = "US_FED_REGISTER"
 API_URL = "https://www.federalregister.gov/api/v1/documents.json"
 NAMESPACE = uuid.UUID("9d51ed4b-f14c-43bc-91cc-3304774b574a")
 SCOPE_RULE_VERSION = "federal-register-policy-scope-v1"
-
-# overnight 정본의 Policy/Regulation MVP 범위만 후보로 만든다. 먼저 일치한
-# 구체 규칙을 사용하며, 결과는 accepted Event가 아니라 pending candidate다.
-SCOPE_RULES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
-    ("POLICY.SHORT_SELLING_BAN", "djv:ShortSellingBan", ("short selling ban", "prohibit short selling")),
-    ("POLICY.SHORT_SELLING_RESUMPTION", "djv:ShortSellingResumption", ("resume short selling", "short selling resumption")),
-    ("POLICY.EXPORT_CONTROL", "djv:ExportControl", ("export control", "export restriction", "export administration regulations")),
-    ("POLICY.TARIFF", "djv:Tariff", ("tariff", "customs duty", "antidumping duty", "countervailing duty")),
-    ("POLICY.IMPORT_RESTRICTION", "djv:ImportRestriction", ("import restriction", "import ban", "adjusting imports", "import quota")),
-    ("POLICY.SUBSIDY", "djv:Subsidy", ("subsidy", "grant program", "financial assistance award")),
-    ("POLICY.TAX_BENEFIT", "djv:TaxBenefit", ("tax credit", "tax benefit", "tax incentive")),
-    ("POLICY.INVESTMENT_SUPPORT", "djv:InvestmentSupport", ("investment support", "manufacturing incentive", "industrial investment")),
-    ("POLICY.MARKET_REGULATION", "djv:MarketRegulation", ("securities exchange act", "market regulation", "trading rule")),
+CHINA_TERMS = ("china", "chinese", "people's republic of china", "prc")
+SEMICONDUCTOR_TERMS = (
+    "semiconductor", "advanced computing", "integrated circuit", "computing chip"
 )
-
+TIGHTENING_TERMS = (
+    "export control", "export restriction", "export administration regulations",
+    "controls on", "adding entities",
+)
 
 def _stable_id(kind: str, value: str) -> str:
     return str(uuid.uuid5(NAMESPACE, f"{kind}:{value}"))
@@ -44,13 +38,25 @@ def _sha256(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
-def _scope_match(document: dict[str, Any]) -> tuple[str, str] | None:
+def _scope_match(
+    document: dict[str, Any],
+) -> tuple[str, str, tuple[tuple[str, str, str], ...]] | None:
     text = " ".join(
         part for part in (document.get("title"), document.get("abstract")) if part
     ).casefold()
-    for rule_id, event_kind_iri, keywords in SCOPE_RULES:
-        if any(keyword in text for keyword in keywords):
-            return rule_id, event_kind_iri
+    if (
+        any(term in text for term in CHINA_TERMS)
+        and any(term in text for term in SEMICONDUCTOR_TERMS)
+        and any(term in text for term in TIGHTENING_TERMS)
+    ):
+        return (
+            "POLICY.EXPORT_CONTROL.TIGHTENING.CHINA.SEMICONDUCTOR",
+            "djv:ExportControlTightening",
+            (
+                ("djv:targetsAgent", "country:CN", "China"),
+                ("djv:affectsIndustry", "industry:SEMICONDUCTOR", "Semiconductor"),
+            ),
+        )
     return None
 
 
@@ -59,28 +65,61 @@ def _duplicate_group_key(title: str, published_on: str | None) -> str:
     return _sha256(f"{normalized}|{published_on or 'unknown'}")
 
 
+def _insert_relation(
+    connection: Any, *, candidate_id: str, predicate_iri: str,
+    object_key: str, object_label: str, evidence_span_id: str, now: str
+) -> None:
+    relation_id = _stable_id(
+        "relation", f"{candidate_id}:{predicate_iri}:{object_key}:{evidence_span_id}"
+    )
+    connection.execute(
+        """
+        INSERT INTO event_candidate_relations (
+          relation_candidate_id, candidate_id, predicate_iri, object_key,
+          object_label, evidence_span_id, confidence_code, review_status, recorded_at
+        ) VALUES (?, ?, ?, ?, ?, ?, 'high', 'pending', ?)
+        ON CONFLICT(candidate_id, predicate_iri, object_key, evidence_span_id)
+        DO NOTHING
+        """,
+        (relation_id, candidate_id, predicate_iri, object_key, object_label,
+         evidence_span_id, now),
+    )
+
+
 def fetch_documents(
-    *, start_date: str, end_date: str, limit: int = 20, timeout: int = 30
+    *, start_date: str, end_date: str, limit: int = 20, timeout: int = 30,
+    query: str | None = None,
 ) -> list[dict[str, Any]]:
     if limit < 1 or limit > 1000:
         raise ValueError("limit must be between 1 and 1000")
-    params = urllib.parse.urlencode(
-        {
-            "per_page": min(limit, 1000),
+    page_size = min(limit, 1000)
+    query_params: dict[str, Any] = {
+            "per_page": page_size,
             "order": "newest",
             "conditions[publication_date][gte]": start_date,
             "conditions[publication_date][lte]": end_date,
             "conditions[type][]": ["RULE", "PRORULE", "PRESDOCU"],
-        },
-        doseq=True,
-    )
-    request = urllib.request.Request(
-        f"{API_URL}?{params}",
-        headers={"User-Agent": "DAY-JA-VIEW-semantic-events/0.2"},
-    )
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        payload = json.load(response)
-    return payload.get("results", [])[:limit]
+        }
+    if query:
+        query_params["conditions[term]"] = query
+    documents: list[dict[str, Any]] = []
+    page = 1
+    while len(documents) < limit:
+        query_params["page"] = page
+        params = urllib.parse.urlencode(query_params, doseq=True)
+        request = urllib.request.Request(
+            f"{API_URL}?{params}",
+            headers={"User-Agent": "DAY-JA-VIEW-semantic-events/0.2"},
+        )
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            payload = json.load(response)
+        results = payload.get("results", [])
+        documents.extend(results)
+        total_pages = int(payload.get("total_pages", page))
+        if not results or page >= total_pages:
+            break
+        page += 1
+    return documents[:limit]
 
 
 def _previous_document_id(
@@ -141,7 +180,7 @@ def _superseded_candidate_id(
 
 def store_documents(
     database: SemanticEventDB, documents: list[dict[str, Any]]
-) -> dict[str, int | str]:
+) -> dict[str, Any]:
     database.initialize()
     now = utc_now()
     run_id = str(uuid.uuid4())
@@ -249,7 +288,7 @@ def store_documents(
                 if not raw_inserted:
                     continue
 
-                scope_rule_id, event_kind_iri = scope_match
+                scope_rule_id, event_kind_iri, relations = scope_match
                 candidate_id = _stable_id(
                     "candidate", f"{source_document_id}:{SCOPE_RULE_VERSION}"
                 )
@@ -269,8 +308,8 @@ def store_documents(
                       review_status, scope_rule_id, duplicate_group_key,
                       parent_event_candidate_id, supersedes_candidate_id, recorded_at
                     ) VALUES (
-                      ?, ?, ?, ?, ?, NULL, NULL, 'unknown', NULL, NULL, ?, NULL,
-                      ?, 'US', ?, ?, 'rule', ?, 'medium', 'pending', ?, ?,
+                      ?, ?, ?, ?, ?, ?, NULL, ?, NULL, NULL, ?, NULL,
+                      ?, 'US', ?, ?, 'rule', ?, 'high', 'pending', ?, ?,
                       NULL, ?, ?
                     )
                     """,
@@ -280,6 +319,8 @@ def store_documents(
                         event_kind_iri,
                         document["title"],
                         document.get("abstract"),
+                        published_on,
+                        published_precision,
                         published_on,
                         published_precision,
                         source_document_id,
@@ -292,30 +333,16 @@ def store_documents(
                     ),
                 )
                 inserted_candidates += max(candidate_result.rowcount, 0)
-
-                review_payload = {
-                    "candidate_id": candidate_id,
-                    "event_kind_iri": event_kind_iri,
-                    "scope_rule_id": scope_rule_id,
-                    "source_document_id": source_document_id,
-                    "reason": "deterministic scope keyword match; occurrence and relations require review",
-                }
-                payload_json = _canonical_json(review_payload)
-                connection.execute(
-                    """
-                    INSERT INTO review_queue (
-                      review_item_id, item_type, candidate_id, payload_json,
-                      payload_hash, priority, status, created_at
-                    ) VALUES (?, 'event_candidate', ?, ?, ?, 3, 'pending', ?)
-                    """,
-                    (
-                        _stable_id("review", candidate_id),
-                        candidate_id,
-                        payload_json,
-                        _sha256(payload_json),
-                        now,
-                    ),
-                )
+                for predicate, object_key, object_label in relations:
+                    _insert_relation(
+                        connection,
+                        candidate_id=candidate_id,
+                        predicate_iri=predicate,
+                        object_key=object_key,
+                        object_label=object_label,
+                        evidence_span_id=title_evidence_id,
+                        now=now,
+                    )
 
             connection.execute(
                 """
@@ -327,7 +354,7 @@ def store_documents(
                 (utc_now(), len(documents), inserted_raw, inserted_candidates, run_id),
             )
 
-    return {
+    result: dict[str, int | str | dict[str, Any]] = {
         "run_id": run_id,
         "fetched": len(documents),
         "inserted_raw": inserted_raw,
@@ -335,12 +362,15 @@ def store_documents(
         "inserted_candidates": inserted_candidates,
         "excluded_from_scope": excluded_from_scope,
     }
+    result["validation"] = validate_candidates(database)
+    return result
 
 
 def collect(
-    database: SemanticEventDB, *, start_date: str, end_date: str, limit: int = 20
-) -> dict[str, int | str]:
+    database: SemanticEventDB, *, start_date: str, end_date: str, limit: int = 20,
+    query: str | None = None,
+) -> dict[str, Any]:
     return store_documents(
         database,
-        fetch_documents(start_date=start_date, end_date=end_date, limit=limit),
+        fetch_documents(start_date=start_date, end_date=end_date, limit=limit, query=query),
     )

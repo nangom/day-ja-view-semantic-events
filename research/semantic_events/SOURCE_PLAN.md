@@ -15,7 +15,7 @@
 | 2 | 미국 수출통제 | BIS | EAR·수출통제 설명, 대상 품목·국가 맥락 | BIS 화면은 보조 근거. 법적 문서는 Federal Register/eCFR 연결 |
 | 2 | 미국 규제 | Regulations.gov | docket, Proposed Rule→Final Rule 연결, 정정·첨부 | api.data.gov 키 필요 |
 | 2 | EU 정책 | EUR-Lex/CELLAR | EU 법령·결정·규정 원문과 CELEX revision | 검색 웹서비스 등록 필요. 대량은 CELLAR 또는 dump |
-| 2 | 지정학 | UCDP GED | 무력충돌 발생 위치·참여자·날짜 후보 | 무료지만 access token 요청 필요, version 필수 |
+| 2 | 지정학 | UCDP GED | 무력충돌 발생 위치·참여자·날짜 후보 | 공식 CSV는 CC BY 4.0 공개 다운로드, API는 무료 token 필요, version 필수 |
 | 보류 | 지정학 | ACLED | 충돌·시위·전략적 사건 Episode 후보 | OAuth와 조직 유형별 라이선스 승인 전 사용 금지 |
 | 보조 | 발견 | GDELT 2.0 | 다국어 뉴스 기반 사건 탐색과 교차검증 후보 | 단독으로 accepted Event 생성 금지 |
 
@@ -62,7 +62,7 @@ OFAC 또는 UN Security Council의 목록 변경·공식 발표
 2. OFAC·UN 제재 revision 수집기
 3. Regulations.gov docket 연결기
 4. EUR-Lex 접근 등록 후 EU 정책 수집기
-5. UCDP token 확보 후 무력충돌 후보 수집기
+5. UCDP 공식 버전 CSV backfill + token 확보 후 API 증분 수집
 6. Episode dedupe review와 accepted KG publisher 연동
 
 ## 5. 팀 확인이 필요한 결정
