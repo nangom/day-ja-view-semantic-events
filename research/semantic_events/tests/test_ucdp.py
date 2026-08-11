@@ -74,6 +74,10 @@ class UcdpCollectorTest(unittest.TestCase):
                 document_url = connection.execute(
                     "SELECT canonical_url FROM source_documents"
                 ).fetchone()[0]
+                snapshot = connection.execute(
+                    """SELECT dataset_version, fetched_count, accepted_count,
+                              input_hash FROM dataset_snapshots"""
+                ).fetchone()
             self.assertEqual(candidate["event_kind_iri"], "djv:Escalation")
             self.assertEqual(candidate["review_status"], "accepted")
             self.assertIsNone(candidate["publicly_available_on"])
@@ -83,6 +87,10 @@ class UcdpCollectorTest(unittest.TestCase):
             self.assertIn("actor:9001", relations)
             self.assertIn("conflict:7001", relations)
             self.assertEqual(document_url, "https://ucdp.uu.se/exploratory/1001")
+            self.assertEqual(snapshot["dataset_version"], "26.1")
+            self.assertEqual(snapshot["fetched_count"], 1)
+            self.assertEqual(snapshot["accepted_count"], 1)
+            self.assertEqual(len(snapshot["input_hash"]), 64)
 
     def test_low_intensity_event_is_excluded(self):
         with tempfile.TemporaryDirectory() as temp_dir:

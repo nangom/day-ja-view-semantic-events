@@ -153,6 +153,8 @@ def collect(
             page_size=page_size,
             max_pages=max_pages,
         ),
+        dataset_version=version,
+        source_uri=f"{API_BASE_URL}/{version}",
     )
 
 
@@ -168,8 +170,10 @@ def collect_official_download(
         headers={"User-Agent": "DAY-JA-VIEW-semantic-events/0.2"},
     )
     with tempfile.TemporaryFile() as archive_file:
+        archive_hasher = hashlib.sha256()
         with urllib.request.urlopen(request, timeout=timeout) as response:
             while chunk := response.read(1024 * 1024):
+                archive_hasher.update(chunk)
                 archive_file.write(chunk)
         archive_file.seek(0)
         with zipfile.ZipFile(archive_file) as archive:
@@ -178,11 +182,22 @@ def collect_official_download(
                 raise RuntimeError(f"expected one CSV in UCDP archive, found {len(csv_names)}")
             with archive.open(csv_names[0]) as raw_stream:
                 text_stream = io.TextIOWrapper(raw_stream, encoding="utf-8-sig", newline="")
-                return store_events(database, csv.DictReader(text_stream))
+                return store_events(
+                    database,
+                    csv.DictReader(text_stream),
+                    dataset_version=DEFAULT_VERSION,
+                    source_uri=download_url,
+                    input_hash=archive_hasher.hexdigest(),
+                )
 
 
 def store_events(
-    database: SemanticEventDB, rows: Iterable[dict[str, Any]]
+    database: SemanticEventDB,
+    rows: Iterable[dict[str, Any]],
+    *,
+    dataset_version: str = DEFAULT_VERSION,
+    source_uri: str = "local-file",
+    input_hash: str | None = None,
 ) -> dict[str, Any]:
     database.initialize()
     now = utc_now()
@@ -190,6 +205,9 @@ def store_events(
     inserted = 0
     excluded = 0
     fetched = 0
+    row_hasher = hashlib.sha256()
+    coverage_start: str | None = None
+    coverage_end: str | None = None
     with closing(database.connect()) as connection:
         with connection:
             connection.execute(
@@ -199,6 +217,8 @@ def store_events(
             )
             for row in rows:
                 fetched += 1
+                row_json = _canonical_json(row)
+                row_hasher.update(_hash(row_json).encode("ascii"))
                 if not is_middle_east_escalation(row):
                     excluded += 1
                     continue
@@ -206,7 +226,7 @@ def store_events(
                 occurrence_on = str(_first(row, "date_start", "date", "event_date"))[:10]
                 occurrence_to_on = str(_first(row, "date_end", "date", "event_date"))[:10]
                 country = str(_first(row, "country", "country_name"))
-                raw_json = _canonical_json(row)
+                raw_json = row_json
                 content_hash = _hash(raw_json)
                 raw_id = _stable_id("raw", f"{source_id}:{content_hash}")
                 document_id = _stable_id("document", f"{source_id}:{content_hash}")
@@ -302,15 +322,48 @@ def store_events(
                         now=now,
                     )
                 inserted += 1
+                coverage_start = min(coverage_start, occurrence_on) if coverage_start else occurrence_on
+                coverage_end = max(coverage_end, occurrence_to_on) if coverage_end else occurrence_to_on
             connection.execute(
                 """UPDATE ingestion_runs SET finished_at=?, status='success',
                    fetched_count=?, inserted_count=?, candidate_count=? WHERE run_id=?""",
                 (utc_now(), fetched, inserted, inserted, run_id),
+            )
+            final_input_hash = input_hash or row_hasher.hexdigest()
+            snapshot_id = _stable_id(
+                "snapshot", f"{SOURCE_CODE}:{dataset_version}:{final_input_hash}"
+            )
+            connection.execute(
+                """INSERT INTO dataset_snapshots (
+                  snapshot_id, source_code, dataset_version, source_uri, input_hash,
+                  fetched_count, accepted_count, coverage_start, coverage_end, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(source_code, dataset_version, input_hash) DO NOTHING""",
+                (snapshot_id, SOURCE_CODE, dataset_version, source_uri, final_input_hash,
+                 fetched, 0, coverage_start, coverage_end, utc_now()),
+            )
+    validation = validate_candidates(database)
+    with closing(database.connect()) as connection:
+        with connection:
+            accepted_count = connection.execute(
+                """SELECT COUNT(*) FROM event_candidates c
+                   JOIN source_documents d ON d.source_document_id=c.source_document_id
+                   WHERE d.source_code=? AND c.event_kind_iri='djv:Escalation'
+                     AND c.review_status='accepted'""",
+                (SOURCE_CODE,),
+            ).fetchone()[0]
+            connection.execute(
+                "UPDATE dataset_snapshots SET accepted_count=? WHERE snapshot_id=?",
+                (accepted_count, snapshot_id),
             )
     return {
         "run_id": run_id,
         "fetched": fetched,
         "inserted_candidates": inserted,
         "excluded_from_scope": excluded,
-        "validation": validate_candidates(database),
+        "snapshot_id": snapshot_id,
+        "dataset_version": dataset_version,
+        "input_hash": final_input_hash,
+        "accepted_count": accepted_count,
+        "validation": validation,
     }

@@ -33,6 +33,7 @@ Numeric 시계열, Event Study, 프론트, Q5 유사 장세는 담당 범위가 
 - UCDP conflict를 `partOfEvent` 관계로 저장
 - 발생일과 최초 수집 가능 시각 분리
 - UCDP 공식 레코드 URL과 원본 hash를 Evidence로 저장
+- dataset version·source URI·입력 hash·coverage·accepted 수 snapshot 저장
 - 같은 입력 재실행 시 중복 삽입 방지
 
 실데이터 검증 결과: GED 26.1 417,968행, accepted Episode 3,780건,
@@ -54,7 +55,7 @@ pending 0건, critical 0건.
 
 1. UCDP 개별 고강도 row를 conflict·dyad·인접 날짜 기준 Episode로 묶는다.
 2. 직전 기간 대비 사망자 증가율과 지속 기간을 사용해 Escalation을 판정한다.
-3. UCDP dataset release date와 ZIP SHA-256을 snapshot metadata로 저장한다.
+3. UCDP dataset release date를 snapshot metadata에 추가한다. ZIP SHA-256은 완료.
 4. API/다운로드 체크포인트를 DB에 기록하고 중단 지점부터 재개한다.
 5. Federal Register의 발표일과 시행일을 분리한다.
 6. 수출통제 완화·해제 및 경제제재·관세·수입제한 규칙을 추가한다.

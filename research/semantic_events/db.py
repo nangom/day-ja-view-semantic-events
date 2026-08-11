@@ -91,6 +91,7 @@ class SemanticEventDB:
         tables = (
             "source_registry",
             "event_kind_catalog",
+            "dataset_snapshots",
             "raw_source_items",
             "source_documents",
             "evidence_spans",
