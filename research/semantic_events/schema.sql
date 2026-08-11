@@ -30,6 +30,20 @@ CREATE TABLE IF NOT EXISTS ingestion_runs (
   error_message TEXT
 );
 
+CREATE TABLE IF NOT EXISTS dataset_snapshots (
+  snapshot_id TEXT PRIMARY KEY,
+  source_code TEXT NOT NULL REFERENCES source_registry(source_code),
+  dataset_version TEXT NOT NULL,
+  source_uri TEXT NOT NULL,
+  input_hash TEXT NOT NULL,
+  fetched_count INTEGER NOT NULL,
+  accepted_count INTEGER NOT NULL,
+  coverage_start TEXT,
+  coverage_end TEXT,
+  created_at TEXT NOT NULL,
+  UNIQUE (source_code, dataset_version, input_hash)
+);
+
 CREATE TABLE IF NOT EXISTS raw_source_items (
   raw_id TEXT PRIMARY KEY,
   source_code TEXT NOT NULL REFERENCES source_registry(source_code),

@@ -13,6 +13,7 @@
   {"event_kind_iri":"djv:TradePolicy","parent_iri":"djv:PolicyEventKind","domain":"policy_regulation","label_ko":"무역정책","label_en":"Trade Policy","definition":"관세·수출입 제한 등 무역 정책"},
   {"event_kind_iri":"djv:Tariff","parent_iri":"djv:TradePolicy","domain":"policy_regulation","label_ko":"관세","label_en":"Tariff","definition":"관세 부과·인상·인하"},
   {"event_kind_iri":"djv:ExportControl","parent_iri":"djv:TradePolicy","domain":"policy_regulation","label_ko":"수출통제","label_en":"Export Control","definition":"특정 품목·기술·국가에 대한 수출통제"},
+  {"event_kind_iri":"djv:ExportControlTightening","parent_iri":"djv:ExportControl","domain":"policy_regulation","label_ko":"수출통제 강화","label_en":"Export Control Tightening","definition":"특정 품목·기술·국가에 대한 수출통제의 신설 또는 강화 Episode"},
   {"event_kind_iri":"djv:ImportRestriction","parent_iri":"djv:TradePolicy","domain":"policy_regulation","label_ko":"수입제한","label_en":"Import Restriction","definition":"수입 금지·제한·쿼터"},
   {"event_kind_iri":"djv:IndustrySupportPolicy","parent_iri":"djv:PolicyEventKind","domain":"policy_regulation","label_ko":"산업지원정책","label_en":"Industry Support Policy","definition":"특정 산업의 투자·생산을 지원하는 정책"},
   {"event_kind_iri":"djv:Subsidy","parent_iri":"djv:IndustrySupportPolicy","domain":"policy_regulation","label_ko":"보조금","label_en":"Subsidy","definition":"산업·기업 대상 보조금"},

@@ -10,4 +10,5 @@ venv/
 *.sqlite3
 *.db
 data/
+work/
 

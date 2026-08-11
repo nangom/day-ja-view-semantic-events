@@ -4,20 +4,21 @@ DAY-JA-VIEW Q2 Core의 시멘틱 조건 가운데 **지정학 사건**과
 **정책·규제 사건**의 후보 데이터를 수집한다.
 
 이 모듈은 `origin/codex/overnight-bootstrap`의 2026-08-11 정본을 따른다.
-뉴스 기사 DB를 복제하거나 후보를 운영 사건으로 자동 승인하지 않는다.
+뉴스 기사 DB를 복제하지 않는다. 최신 팀 결정에 따라 결정적 검증을 통과한
+후보는 자동 승인하고, 실패 후보만 pending으로 유지한다.
 
 ## 담당 범위
 
 1. 원본 응답과 해시를 불변 저장한다.
 2. 원본을 SourceDocument와 EvidenceSpan으로 분리한다.
 3. 승인된 MVP 범위에 해당하는 사건 후보만 생성한다.
-4. 모든 후보를 `pending` 상태로 review queue에 넣는다.
+4. 검증 통과 후보는 `accepted`, 실패 후보만 `pending`으로 저장한다.
 5. 날짜와 시각의 정밀도를 보존한다.
 6. 정정 문서는 이전 문서를 덮어쓰지 않고 `supersedes`로 연결한다.
 
-이 모듈은 accepted KG snapshot과 SQL projection을 만들지 않는다. 운영 publisher는
-source 계약 승인, ontology/SHACL 검증, 사람 또는 승인 규칙의 review가 끝난 뒤에만
-accepted assertion과 projection을 생성해야 한다.
+이 모듈은 accepted KG snapshot과 SQL projection 자체는 만들지 않는다. 검증된
+accepted Episode와 관계를 제공하며, 운영 publisher가 이를 snapshot과 projection으로
+발행한다.
 
 ## Policy/Regulation MVP 범위
 
