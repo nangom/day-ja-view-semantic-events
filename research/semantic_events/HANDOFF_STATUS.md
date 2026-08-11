@@ -50,15 +50,19 @@ Numeric 시계열, Event Study, 프론트, Q5 유사 장세는 담당 범위가 
 - 검증 통과 시 자동 accepted
 - 발표일과 시행일(`effective_on`) 분리 저장
 - 수출통제 강화·완화와 중국 대상 경제제재 강화 규칙 분리
+- 중국 반도체 대상 관세 인상·인하와 수입제한 강화·해제 규칙 분리
+- 미국 반도체 보조금 지급·세제혜택 확대 규칙 추가
+- 미국 금융시장 규제 강화·완화 규칙 추가
+- 주제 단어만 있고 정책 방향이 불명확한 문서는 후보에서 제외
 
-실데이터 검증 결과: 검색 문서 42건 중 정책 Episode 4건 accepted,
+기존 실데이터 회귀 검증 결과: 검색 문서 42건 중 정책 Episode 3건 accepted,
 pending 0건, critical 0건.
 
 ## 남은 작업
 
 1. Episode 지속 기간을 별도 강도 피처로 반영한다.
 2. API/다운로드 체크포인트를 DB에 기록하고 중단 지점부터 재개한다.
-3. 관세·수입제한·보조금·시장규제 규칙을 추가한다.
+3. 투자지원·공매도 전용 규칙은 공식 문서 fixture와 범위를 확정한 뒤 추가한다.
 4. 국가·기관·산업 ID catalog를 팀 ontology IRI와 최종 정렬한다.
 5. 팀 백엔드가 읽을 projection/export 계약을 확정한다.
 
@@ -69,3 +73,5 @@ pending 0건, critical 0건.
   보수적인 public availability로 사용한다.
 - UCDP API 증분 실행에는 `UCDP_API_TOKEN`이 필요하다. 공식 ZIP backfill은
   토큰 없이 가능하다.
+- 새 정책 EventKind 이름은 개인 저장소의 재현 가능한 임시 분류다. 팀 ontology
+  IRI가 확정되면 이름만 매핑하고 판별 근거와 원본 hash는 유지한다.

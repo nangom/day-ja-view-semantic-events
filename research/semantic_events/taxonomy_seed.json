@@ -25,5 +25,11 @@
   {"event_kind_iri":"djv:RegulationTightening","parent_iri":"djv:MarketRegulation","domain":"policy_regulation","label_ko":"규제 강화","label_en":"Regulation Tightening","definition":"시장 규제의 강화"},
   {"event_kind_iri":"djv:RegulationEasing","parent_iri":"djv:MarketRegulation","domain":"policy_regulation","label_ko":"규제 완화","label_en":"Regulation Easing","definition":"시장 규제의 완화"},
   {"event_kind_iri":"djv:ShortSellingBan","parent_iri":"djv:MarketRegulation","domain":"policy_regulation","label_ko":"공매도 금지","label_en":"Short Selling Ban","definition":"공매도 금지 시행"},
-  {"event_kind_iri":"djv:ShortSellingResumption","parent_iri":"djv:MarketRegulation","domain":"policy_regulation","label_ko":"공매도 재개","label_en":"Short Selling Resumption","definition":"공매도 금지 해제 또는 재개"}
+  {"event_kind_iri":"djv:ShortSellingResumption","parent_iri":"djv:MarketRegulation","domain":"policy_regulation","label_ko":"공매도 재개","label_en":"Short Selling Resumption","definition":"공매도 금지 해제 또는 재개"},
+  {"event_kind_iri":"djv:TariffIncrease","parent_iri":"djv:Tariff","domain":"policy_regulation","label_ko":"관세 인상","label_en":"Tariff Increase","definition":"관세율의 신설 또는 인상 Episode"},
+  {"event_kind_iri":"djv:TariffDecrease","parent_iri":"djv:Tariff","domain":"policy_regulation","label_ko":"관세 인하","label_en":"Tariff Decrease","definition":"관세율의 인하 또는 철폐 Episode"},
+  {"event_kind_iri":"djv:ImportRestrictionTightening","parent_iri":"djv:ImportRestriction","domain":"policy_regulation","label_ko":"수입 제한 강화","label_en":"Import Restriction Tightening","definition":"수입 금지·제한·쿼터의 신설 또는 강화 Episode"},
+  {"event_kind_iri":"djv:ImportRestrictionLifting","parent_iri":"djv:ImportRestriction","domain":"policy_regulation","label_ko":"수입 제한 완화","label_en":"Import Restriction Lifting","definition":"수입 금지·제한·쿼터의 완화 또는 해제 Episode"},
+  {"event_kind_iri":"djv:SubsidyAward","parent_iri":"djv:Subsidy","domain":"policy_regulation","label_ko":"보조금 지급","label_en":"Subsidy Award","definition":"산업·기업 대상 보조금 또는 보조금 사업 확정 Episode"},
+  {"event_kind_iri":"djv:TaxBenefitExpansion","parent_iri":"djv:TaxBenefit","domain":"policy_regulation","label_ko":"세제 혜택 확대","label_en":"Tax Benefit Expansion","definition":"세액공제·감면·면제의 신설 또는 확대 Episode"}
 ]

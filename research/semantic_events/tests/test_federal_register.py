@@ -50,8 +50,54 @@ CHINA_SANCTIONS_DOCUMENT = {
     "document_number": "TEST-2026-0005",
 }
 
+POLICY_FIXTURES = [
+    ("Additional Tariffs on Semiconductors From China", "Increasing tariffs and imposing an additional tariff on Chinese semiconductor imports.", "djv:TariffIncrease"),
+    ("Tariff Reduction for Semiconductors From China", "Reducing tariffs and customs duty on Chinese semiconductor imports.", "djv:TariffDecrease"),
+    ("Import Restrictions on Semiconductors From China", "Restricting imports through an import restriction on Chinese semiconductor products.", "djv:ImportRestrictionTightening"),
+    ("Lifting Semiconductor Import Restrictions for China", "Removing import restrictions on Chinese integrated circuits.", "djv:ImportRestrictionLifting"),
+    ("Semiconductor Grant Program", "Financial assistance for semiconductor manufacturing through a grant program.", "djv:SubsidyAward"),
+    ("Advanced Manufacturing Investment Tax Credit", "Expanding the tax credit for semiconductor investment.", "djv:TaxBenefitExpansion"),
+    ("Securities Market Short Selling Ban", "New requirements prohibiting short selling in the financial market.", "djv:RegulationTightening"),
+    ("Securities Market Regulatory Relief", "Regulatory relief removing requirements for broker-dealers.", "djv:RegulationEasing"),
+]
+
 
 class FederalRegisterCollectorTest(unittest.TestCase):
+    def test_explicit_policy_rules_are_direction_specific(self):
+        documents = [
+            {
+                **IN_SCOPE_DOCUMENT,
+                "title": title,
+                "abstract": abstract,
+                "document_number": f"POLICY-{index:04d}",
+            }
+            for index, (title, abstract, _kind) in enumerate(POLICY_FIXTURES, 1)
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            database = SemanticEventDB(Path(temp_dir) / "events.sqlite3")
+            result = store_documents(database, documents)
+            self.assertEqual(result["validation"]["critical"], 0)
+            with closing(database.connect()) as connection:
+                kinds = {
+                    row[0] for row in connection.execute(
+                        "SELECT event_kind_iri FROM event_candidates"
+                    )
+                }
+        self.assertEqual(kinds, {fixture[2] for fixture in POLICY_FIXTURES})
+
+    def test_topic_words_without_direction_are_excluded(self):
+        document = {
+            **IN_SCOPE_DOCUMENT,
+            "title": "Semiconductor Tariff and Subsidy Administration",
+            "abstract": "A report discussing China, tariffs, subsidies, and financial markets.",
+            "document_number": "POLICY-AMBIGUOUS",
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            database = SemanticEventDB(Path(temp_dir) / "events.sqlite3")
+            result = store_documents(database, [document])
+        self.assertEqual(result["inserted_candidates"], 0)
+        self.assertEqual(result["excluded_from_scope"], 1)
+
     def test_policy_direction_rules_distinguish_easing_and_sanctions(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             database = SemanticEventDB(Path(temp_dir) / "events.sqlite3")

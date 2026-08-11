@@ -16,7 +16,7 @@ from ..validation import validate_candidates
 SOURCE_CODE = "US_FED_REGISTER"
 API_URL = "https://www.federalregister.gov/api/v1/documents.json"
 NAMESPACE = uuid.UUID("9d51ed4b-f14c-43bc-91cc-3304774b574a")
-SCOPE_RULE_VERSION = "federal-register-policy-scope-v1"
+SCOPE_RULE_VERSION = "federal-register-policy-scope-v2"
 CHINA_TERMS = ("china", "chinese", "people's republic of china", "prc")
 SEMICONDUCTOR_TERMS = (
     "semiconductor", "advanced computing", "integrated circuit", "computing chip"
@@ -34,6 +34,44 @@ SANCTION_TERMS = ("economic sanction", "sanctions regulations", "blocking sancti
 SANCTION_TIGHTENING_TERMS = (
     "imposing sanctions", "additional sanctions", "blocking property",
     "adding persons", "designation of",
+)
+TARIFF_TERMS = ("tariff", "customs duty", "import duty")
+TARIFF_INCREASE_TERMS = (
+    "increase tariffs", "increasing tariffs", "additional tariff",
+    "raise tariffs", "raising tariffs", "higher tariffs",
+)
+TARIFF_DECREASE_TERMS = (
+    "decrease tariffs", "decreasing tariffs", "reduce tariffs",
+    "reducing tariffs", "tariff reduction", "removing tariffs",
+)
+IMPORT_RESTRICTION_TERMS = (
+    "import restriction", "import prohibition", "prohibiting imports",
+    "restricting imports", "import quota",
+)
+IMPORT_RELIEF_TERMS = (
+    "removing import restrictions", "lifting import restrictions",
+    "rescinding import restrictions", "removing import prohibition",
+)
+SUBSIDY_TERMS = ("subsidy", "grant program", "financial assistance")
+SUBSIDY_AWARD_TERMS = (
+    "providing subsidies", "awarding grants", "grant awards",
+    "financial assistance for", "incentives for semiconductor",
+)
+TAX_BENEFIT_TERMS = ("tax credit", "tax deduction", "tax exemption")
+TAX_BENEFIT_EXPANSION_TERMS = (
+    "establishing a tax credit", "expanding the tax credit",
+    "increase the tax credit", "investment tax credit",
+)
+FINANCIAL_MARKET_TERMS = (
+    "securities market", "financial market", "broker-dealer", "short selling",
+)
+REGULATION_TIGHTENING_TERMS = (
+    "new requirements", "additional requirements", "prohibiting short selling",
+    "short selling ban", "strengthening investor protections",
+)
+REGULATION_EASING_TERMS = (
+    "removing requirements", "rescinding requirements", "regulatory relief",
+    "resuming short selling", "lifting the short selling ban",
 )
 
 def _stable_id(kind: str, value: str) -> str:
@@ -56,6 +94,27 @@ def _scope_match(
     ).casefold()
     has_china = any(term in text for term in CHINA_TERMS)
     has_semiconductor = any(term in text for term in SEMICONDUCTOR_TERMS)
+
+    # Direction-specific rules are intentionally conjunctive. A topic word by
+    # itself is never enough to produce an automatically accepted episode.
+    if (
+        any(term in text for term in FINANCIAL_MARKET_TERMS)
+        and any(term in text for term in REGULATION_EASING_TERMS)
+    ):
+        return (
+            "POLICY.MARKET_REGULATION.EASING.US",
+            "djv:RegulationEasing",
+            (("djv:occurredIn", "country:US", "United States"),),
+        )
+    if (
+        any(term in text for term in FINANCIAL_MARKET_TERMS)
+        and any(term in text for term in REGULATION_TIGHTENING_TERMS)
+    ):
+        return (
+            "POLICY.MARKET_REGULATION.TIGHTENING.US",
+            "djv:RegulationTightening",
+            (("djv:occurredIn", "country:US", "United States"),),
+        )
     if (
         has_china and has_semiconductor
         and any(term in text for term in EASING_TERMS)
@@ -65,6 +124,76 @@ def _scope_match(
             "djv:ExportControlEasing",
             (
                 ("djv:targetsAgent", "country:CN", "China"),
+                ("djv:affectsIndustry", "industry:SEMICONDUCTOR", "Semiconductor"),
+            ),
+        )
+    if (
+        has_china and has_semiconductor
+        and any(term in text for term in TARIFF_TERMS)
+        and any(term in text for term in TARIFF_DECREASE_TERMS)
+    ):
+        return (
+            "POLICY.TARIFF.DECREASE.CHINA.SEMICONDUCTOR",
+            "djv:TariffDecrease",
+            (
+                ("djv:targetsAgent", "country:CN", "China"),
+                ("djv:affectsIndustry", "industry:SEMICONDUCTOR", "Semiconductor"),
+            ),
+        )
+    if (
+        has_china and has_semiconductor
+        and any(term in text for term in TARIFF_TERMS)
+        and any(term in text for term in TARIFF_INCREASE_TERMS)
+    ):
+        return (
+            "POLICY.TARIFF.INCREASE.CHINA.SEMICONDUCTOR",
+            "djv:TariffIncrease",
+            (
+                ("djv:targetsAgent", "country:CN", "China"),
+                ("djv:affectsIndustry", "industry:SEMICONDUCTOR", "Semiconductor"),
+            ),
+        )
+    if has_china and has_semiconductor and any(
+        term in text for term in IMPORT_RELIEF_TERMS
+    ):
+        return (
+            "POLICY.IMPORT_RESTRICTION.LIFTING.CHINA.SEMICONDUCTOR",
+            "djv:ImportRestrictionLifting",
+            (
+                ("djv:targetsAgent", "country:CN", "China"),
+                ("djv:affectsIndustry", "industry:SEMICONDUCTOR", "Semiconductor"),
+            ),
+        )
+    if has_china and has_semiconductor and any(
+        term in text for term in IMPORT_RESTRICTION_TERMS
+    ):
+        return (
+            "POLICY.IMPORT_RESTRICTION.TIGHTENING.CHINA.SEMICONDUCTOR",
+            "djv:ImportRestrictionTightening",
+            (
+                ("djv:targetsAgent", "country:CN", "China"),
+                ("djv:affectsIndustry", "industry:SEMICONDUCTOR", "Semiconductor"),
+            ),
+        )
+    if has_semiconductor and any(term in text for term in SUBSIDY_TERMS) and any(
+        term in text for term in SUBSIDY_AWARD_TERMS
+    ):
+        return (
+            "POLICY.SUBSIDY.AWARD.US.SEMICONDUCTOR",
+            "djv:SubsidyAward",
+            (
+                ("djv:occurredIn", "country:US", "United States"),
+                ("djv:affectsIndustry", "industry:SEMICONDUCTOR", "Semiconductor"),
+            ),
+        )
+    if has_semiconductor and any(term in text for term in TAX_BENEFIT_TERMS) and any(
+        term in text for term in TAX_BENEFIT_EXPANSION_TERMS
+    ):
+        return (
+            "POLICY.TAX_BENEFIT.EXPANSION.US.SEMICONDUCTOR",
+            "djv:TaxBenefitExpansion",
+            (
+                ("djv:occurredIn", "country:US", "United States"),
                 ("djv:affectsIndustry", "industry:SEMICONDUCTOR", "Semiconductor"),
             ),
         )
