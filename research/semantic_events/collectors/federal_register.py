@@ -9,6 +9,7 @@ import uuid
 from contextlib import closing
 from typing import Any
 
+from ..checkpoints import clear_scope, load_page, save_page, scope_key
 from ..db import SemanticEventDB, utc_now
 from ..validation import validate_candidates
 
@@ -16,14 +17,66 @@ from ..validation import validate_candidates
 SOURCE_CODE = "US_FED_REGISTER"
 API_URL = "https://www.federalregister.gov/api/v1/documents.json"
 NAMESPACE = uuid.UUID("9d51ed4b-f14c-43bc-91cc-3304774b574a")
-SCOPE_RULE_VERSION = "federal-register-policy-scope-v1"
+SCOPE_RULE_VERSION = "federal-register-policy-scope-v2"
 CHINA_TERMS = ("china", "chinese", "people's republic of china", "prc")
 SEMICONDUCTOR_TERMS = (
     "semiconductor", "advanced computing", "integrated circuit", "computing chip"
 )
 TIGHTENING_TERMS = (
-    "export control", "export restriction", "export administration regulations",
-    "controls on", "adding entities",
+    "additional export controls", "new export controls", "tightening export",
+    "expanding export controls", "adding entities", "addition of entities",
+    "restricting exports",
+)
+EASING_TERMS = (
+    "easing export controls", "removing export controls", "removal of controls",
+    "rescinding export controls", "license exception", "removing entities",
+)
+SANCTION_TERMS = ("economic sanction", "sanctions regulations", "blocking sanctions")
+SANCTION_TIGHTENING_TERMS = (
+    "imposing sanctions", "additional sanctions", "blocking property",
+    "adding persons", "designation of",
+)
+TARIFF_TERMS = ("tariff", "customs duty", "import duty")
+TARIFF_INCREASE_TERMS = (
+    "increase tariffs", "increasing tariffs", "additional tariff",
+    "raise tariffs", "raising tariffs", "higher tariffs",
+)
+TARIFF_DECREASE_TERMS = (
+    "decrease tariffs", "decreasing tariffs", "reduce tariffs",
+    "reducing tariffs", "tariff reduction", "removing tariffs",
+)
+IMPORT_RESTRICTION_TERMS = (
+    "import restriction", "import prohibition", "prohibiting imports",
+    "restricting imports", "import quota",
+)
+IMPORT_RELIEF_TERMS = (
+    "removing import restrictions", "lifting import restrictions",
+    "rescinding import restrictions", "removing import prohibition",
+)
+SUBSIDY_TERMS = ("subsidy", "grant program", "financial assistance")
+SUBSIDY_AWARD_TERMS = (
+    "providing subsidies", "awarding grants", "grant awards",
+    "financial assistance for", "incentives for semiconductor",
+)
+TAX_BENEFIT_TERMS = ("tax credit", "tax deduction", "tax exemption")
+TAX_BENEFIT_EXPANSION_TERMS = (
+    "establishing a tax credit", "expanding the tax credit",
+    "increase the tax credit", "investment tax credit",
+)
+FINANCIAL_MARKET_TERMS = (
+    "securities market", "financial market", "broker-dealer", "short selling",
+)
+REGULATION_TIGHTENING_TERMS = (
+    "new requirements", "additional requirements", "prohibiting short selling",
+    "short selling ban", "strengthening investor protections",
+)
+REGULATION_EASING_TERMS = (
+    "removing requirements", "rescinding requirements", "regulatory relief",
+    "resuming short selling", "lifting the short selling ban",
+)
+INVESTMENT_SUPPORT_TERMS = (
+    "investment support", "investment incentive", "funding for semiconductor",
+    "semiconductor manufacturing incentives", "facility investment grant",
 )
 
 def _stable_id(kind: str, value: str) -> str:
@@ -44,9 +97,138 @@ def _scope_match(
     text = " ".join(
         part for part in (document.get("title"), document.get("abstract")) if part
     ).casefold()
+    has_china = any(term in text for term in CHINA_TERMS)
+    has_semiconductor = any(term in text for term in SEMICONDUCTOR_TERMS)
+
+    # Direction-specific rules are intentionally conjunctive. A topic word by
+    # itself is never enough to produce an automatically accepted episode.
+    if "short selling" in text and any(
+        term in text for term in ("resuming short selling", "lifting the short selling ban")
+    ):
+        return (
+            "POLICY.SHORT_SELLING.RESUMPTION.US",
+            "djv:ShortSellingResumption",
+            (("djv:occurredIn", "country:US", "United States"),),
+        )
+    if "short selling" in text and any(
+        term in text for term in ("short selling ban", "prohibiting short selling")
+    ):
+        return (
+            "POLICY.SHORT_SELLING.BAN.US",
+            "djv:ShortSellingBan",
+            (("djv:occurredIn", "country:US", "United States"),),
+        )
     if (
-        any(term in text for term in CHINA_TERMS)
-        and any(term in text for term in SEMICONDUCTOR_TERMS)
+        any(term in text for term in FINANCIAL_MARKET_TERMS)
+        and any(term in text for term in REGULATION_EASING_TERMS)
+    ):
+        return (
+            "POLICY.MARKET_REGULATION.EASING.US",
+            "djv:RegulationEasing",
+            (("djv:occurredIn", "country:US", "United States"),),
+        )
+    if (
+        any(term in text for term in FINANCIAL_MARKET_TERMS)
+        and any(term in text for term in REGULATION_TIGHTENING_TERMS)
+    ):
+        return (
+            "POLICY.MARKET_REGULATION.TIGHTENING.US",
+            "djv:RegulationTightening",
+            (("djv:occurredIn", "country:US", "United States"),),
+        )
+    if (
+        has_china and has_semiconductor
+        and any(term in text for term in EASING_TERMS)
+    ):
+        return (
+            "POLICY.EXPORT_CONTROL.EASING.CHINA.SEMICONDUCTOR",
+            "djv:ExportControlEasing",
+            (
+                ("djv:targetsAgent", "country:CN", "China"),
+                ("djv:affectsIndustry", "industry:SEMICONDUCTOR", "Semiconductor"),
+            ),
+        )
+    if (
+        has_china and has_semiconductor
+        and any(term in text for term in TARIFF_TERMS)
+        and any(term in text for term in TARIFF_DECREASE_TERMS)
+    ):
+        return (
+            "POLICY.TARIFF.DECREASE.CHINA.SEMICONDUCTOR",
+            "djv:TariffDecrease",
+            (
+                ("djv:targetsAgent", "country:CN", "China"),
+                ("djv:affectsIndustry", "industry:SEMICONDUCTOR", "Semiconductor"),
+            ),
+        )
+    if (
+        has_china and has_semiconductor
+        and any(term in text for term in TARIFF_TERMS)
+        and any(term in text for term in TARIFF_INCREASE_TERMS)
+    ):
+        return (
+            "POLICY.TARIFF.INCREASE.CHINA.SEMICONDUCTOR",
+            "djv:TariffIncrease",
+            (
+                ("djv:targetsAgent", "country:CN", "China"),
+                ("djv:affectsIndustry", "industry:SEMICONDUCTOR", "Semiconductor"),
+            ),
+        )
+    if has_china and has_semiconductor and any(
+        term in text for term in IMPORT_RELIEF_TERMS
+    ):
+        return (
+            "POLICY.IMPORT_RESTRICTION.LIFTING.CHINA.SEMICONDUCTOR",
+            "djv:ImportRestrictionLifting",
+            (
+                ("djv:targetsAgent", "country:CN", "China"),
+                ("djv:affectsIndustry", "industry:SEMICONDUCTOR", "Semiconductor"),
+            ),
+        )
+    if has_china and has_semiconductor and any(
+        term in text for term in IMPORT_RESTRICTION_TERMS
+    ):
+        return (
+            "POLICY.IMPORT_RESTRICTION.TIGHTENING.CHINA.SEMICONDUCTOR",
+            "djv:ImportRestrictionTightening",
+            (
+                ("djv:targetsAgent", "country:CN", "China"),
+                ("djv:affectsIndustry", "industry:SEMICONDUCTOR", "Semiconductor"),
+            ),
+        )
+    if has_semiconductor and any(term in text for term in SUBSIDY_TERMS) and any(
+        term in text for term in SUBSIDY_AWARD_TERMS
+    ):
+        return (
+            "POLICY.SUBSIDY.AWARD.US.SEMICONDUCTOR",
+            "djv:SubsidyAward",
+            (
+                ("djv:occurredIn", "country:US", "United States"),
+                ("djv:affectsIndustry", "industry:SEMICONDUCTOR", "Semiconductor"),
+            ),
+        )
+    if has_semiconductor and any(term in text for term in TAX_BENEFIT_TERMS) and any(
+        term in text for term in TAX_BENEFIT_EXPANSION_TERMS
+    ):
+        return (
+            "POLICY.TAX_BENEFIT.EXPANSION.US.SEMICONDUCTOR",
+            "djv:TaxBenefitExpansion",
+            (
+                ("djv:occurredIn", "country:US", "United States"),
+                ("djv:affectsIndustry", "industry:SEMICONDUCTOR", "Semiconductor"),
+            ),
+        )
+    if has_semiconductor and any(term in text for term in INVESTMENT_SUPPORT_TERMS):
+        return (
+            "POLICY.INVESTMENT_SUPPORT.US.SEMICONDUCTOR",
+            "djv:InvestmentSupport",
+            (
+                ("djv:occurredIn", "country:US", "United States"),
+                ("djv:affectsIndustry", "industry:SEMICONDUCTOR", "Semiconductor"),
+            ),
+        )
+    if (
+        has_china and has_semiconductor
         and any(term in text for term in TIGHTENING_TERMS)
     ):
         return (
@@ -56,6 +238,16 @@ def _scope_match(
                 ("djv:targetsAgent", "country:CN", "China"),
                 ("djv:affectsIndustry", "industry:SEMICONDUCTOR", "Semiconductor"),
             ),
+        )
+    if (
+        has_china
+        and any(term in text for term in SANCTION_TERMS)
+        and any(term in text for term in SANCTION_TIGHTENING_TERMS)
+    ):
+        return (
+            "POLICY.ECONOMIC_SANCTION.TIGHTENING.CHINA",
+            "djv:EconomicSanctionTightening",
+            (("djv:targetsAgent", "country:CN", "China"),),
         )
     return None
 
@@ -88,7 +280,7 @@ def _insert_relation(
 
 def fetch_documents(
     *, start_date: str, end_date: str, limit: int = 20, timeout: int = 30,
-    query: str | None = None,
+    query: str | None = None, checkpoint_database: SemanticEventDB | None = None,
 ) -> list[dict[str, Any]]:
     if limit < 1 or limit > 1000:
         raise ValueError("limit must be between 1 and 1000")
@@ -103,16 +295,27 @@ def fetch_documents(
     if query:
         query_params["conditions[term]"] = query
     documents: list[dict[str, Any]] = []
+    checkpoint_key = scope_key({
+        "start_date": start_date, "end_date": end_date, "limit": limit,
+        "query": query, "types": query_params["conditions[type][]"],
+    })
     page = 1
     while len(documents) < limit:
         query_params["page"] = page
         params = urllib.parse.urlencode(query_params, doseq=True)
-        request = urllib.request.Request(
-            f"{API_URL}?{params}",
-            headers={"User-Agent": "DAY-JA-VIEW-semantic-events/0.2"},
+        payload = (
+            load_page(checkpoint_database, SOURCE_CODE, checkpoint_key, page)
+            if checkpoint_database else None
         )
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            payload = json.load(response)
+        if payload is None:
+            request = urllib.request.Request(
+                f"{API_URL}?{params}",
+                headers={"User-Agent": "DAY-JA-VIEW-semantic-events/0.2"},
+            )
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                payload = json.load(response)
+            if checkpoint_database:
+                save_page(checkpoint_database, SOURCE_CODE, checkpoint_key, page, payload)
         results = payload.get("results", [])
         documents.extend(results)
         total_pages = int(payload.get("total_pages", page))
@@ -301,14 +504,15 @@ def store_documents(
                     INSERT INTO event_candidates (
                       candidate_id, candidate_iri, event_kind_iri, title, summary,
                       occurrence_on, occurrence_at, occurrence_precision,
-                      occurrence_to_on, occurrence_to_at, publicly_available_on,
+                      occurrence_to_on, occurrence_to_at, effective_on, effective_at,
+                      publicly_available_on,
                       publicly_available_at, availability_precision, jurisdiction,
                       source_document_id, primary_evidence_span_id,
                       extraction_kind, extraction_rule_version, confidence_code,
                       review_status, scope_rule_id, duplicate_group_key,
                       parent_event_candidate_id, supersedes_candidate_id, recorded_at
                     ) VALUES (
-                      ?, ?, ?, ?, ?, ?, NULL, ?, NULL, NULL, ?, NULL,
+                      ?, ?, ?, ?, ?, ?, NULL, ?, NULL, NULL, ?, NULL, ?, NULL,
                       ?, 'US', ?, ?, 'rule', ?, 'high', 'pending', ?, ?,
                       NULL, ?, ?
                     )
@@ -321,6 +525,7 @@ def store_documents(
                         document.get("abstract"),
                         published_on,
                         published_precision,
+                        document.get("effective_on"),
                         published_on,
                         published_precision,
                         source_document_id,
@@ -368,9 +573,21 @@ def store_documents(
 
 def collect(
     database: SemanticEventDB, *, start_date: str, end_date: str, limit: int = 20,
-    query: str | None = None,
+    query: str | None = None, resume: bool = False,
 ) -> dict[str, Any]:
-    return store_documents(
+    checkpoint_key = scope_key({
+        "start_date": start_date, "end_date": end_date, "limit": limit,
+        "query": query, "types": ["RULE", "PRORULE", "PRESDOCU"],
+    })
+    result = store_documents(
         database,
-        fetch_documents(start_date=start_date, end_date=end_date, limit=limit, query=query),
+        fetch_documents(
+            start_date=start_date, end_date=end_date, limit=limit, query=query,
+            checkpoint_database=database if resume else None,
+        ),
     )
+    if resume:
+        result["cleared_checkpoint_pages"] = clear_scope(
+            database, SOURCE_CODE, checkpoint_key
+        )
+    return result

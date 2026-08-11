@@ -9,7 +9,7 @@ DAY-JA-VIEW Q2 Core를 위한 지정학·정책/규제 사건 후보 수집 연�
 - SourceDocument·EvidenceSpan 분리
 - Policy/Regulation MVP 범위 필터
 - 검증 통과 Event candidate 자동 accepted, 실패 항목만 review queue 생성
-- UCDP GED JSON 기반 중동 무력충돌 확대 Episode 생성
+- UCDP GED 기반 분쟁별 중동 무력충돌 확대 Episode 생성
 - 날짜 정밀도 및 문서 revision 보존
 - SQLite 로컬 프로토타입과 PostgreSQL 이전 고려 스키마
 

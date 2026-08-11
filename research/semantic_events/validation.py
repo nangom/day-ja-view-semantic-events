@@ -11,6 +11,19 @@ from .db import SemanticEventDB, utc_now
 REQUIRED_RELATIONS = {
     "djv:Escalation": ("djv:occurredIn",),
     "djv:ExportControlTightening": ("djv:targetsAgent", "djv:affectsIndustry"),
+    "djv:ExportControlEasing": ("djv:targetsAgent", "djv:affectsIndustry"),
+    "djv:EconomicSanctionTightening": ("djv:targetsAgent",),
+    "djv:TariffIncrease": ("djv:targetsAgent", "djv:affectsIndustry"),
+    "djv:TariffDecrease": ("djv:targetsAgent", "djv:affectsIndustry"),
+    "djv:ImportRestrictionTightening": ("djv:targetsAgent", "djv:affectsIndustry"),
+    "djv:ImportRestrictionLifting": ("djv:targetsAgent", "djv:affectsIndustry"),
+    "djv:SubsidyAward": ("djv:occurredIn", "djv:affectsIndustry"),
+    "djv:TaxBenefitExpansion": ("djv:occurredIn", "djv:affectsIndustry"),
+    "djv:RegulationTightening": ("djv:occurredIn",),
+    "djv:RegulationEasing": ("djv:occurredIn",),
+    "djv:ShortSellingBan": ("djv:occurredIn",),
+    "djv:ShortSellingResumption": ("djv:occurredIn",),
+    "djv:InvestmentSupport": ("djv:occurredIn", "djv:affectsIndustry"),
 }
 AUTO_ACCEPT_KINDS = frozenset(REQUIRED_RELATIONS)
 
